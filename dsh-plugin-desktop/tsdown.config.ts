@@ -24,6 +24,8 @@ export default defineConfig([
       updates: 'src/updates.ts',
       'windows-pwsh-sandbox': 'src/windows-pwsh-sandbox.ts',
       'windows-acl-runner': 'src/windows-acl-runner.ts',
+      'message-channels': 'src/message-channels/index.ts',
+      'main-session': 'src/main-session/index.ts',
       main: 'src/main.ts',
     },
     outDir: 'lib',

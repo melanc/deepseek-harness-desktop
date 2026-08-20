@@ -33,5 +33,16 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     'details': { kind: 'single'; scope: 'session'; owner: Record<never, never> }
     /** Frame-wide additive overlays. */
     'shell.overlay': { kind: 'list'; scope: 'root' }
+    /**
+     * Upstream conversation session tabs (对话/轨迹). Desktop adds the
+     * 「任务」tab as an additional registered view; the entry type matches
+     * the upstream conversation.view slot contract.
+     */
+    'conversation.view': { kind: 'list'; scope: 'session'; owner: Record<never, never> }
+    /**
+     * Upstream sidebar footer action buttons (settings, plugin panel).
+     * Desktop adds the fixed 主会话 entry here.
+     */
+    'sidebar.footer.action': { kind: 'list'; scope: 'root' }
   }
 }

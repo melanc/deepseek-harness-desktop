@@ -8,6 +8,9 @@ import type {} from '@deepseek-ai/dsh-client-ui-theme/client'
 import { applyAdvancedShell } from './advanced-shell.ts'
 import { startRendererBootReporter } from './boot-health.ts'
 import { parseDesktopClientEnvironment } from './environment.ts'
+import { applyMessageChannelsSection } from './message-channels/index.tsx'
+import { applyTasksView } from './tasks-view/index.tsx'
+import { applyMainSessionEntry } from './main-session-entry/index.tsx'
 
 export { applyAdvancedShell } from './advanced-shell.ts'
 export {
@@ -19,6 +22,9 @@ export {
 export type { RendererBootLoader, RendererBootReport } from './boot-health.ts'
 export { parseDesktopClientEnvironment } from './environment.ts'
 export type { DesktopClientEnvironment, DesktopClientMode, DesktopClientPlatform } from './environment.ts'
+export { applyMessageChannelsSection } from './message-channels/index.tsx'
+export { applyTasksView, TASKS_VIEW_ID } from './tasks-view/index.tsx'
+export { applyMainSessionEntry, MAIN_SESSION_ENTRY_ID } from './main-session-entry/index.tsx'
 
 /** Services required by advanced presentation. */
 export const inject = [
@@ -35,4 +41,14 @@ export function apply(ctx: ClientContext): void {
     'dsh-plugin-desktop: renderer boot health report',
   )
   if (environment.mode === 'advanced') applyAdvancedShell(ctx, environment)
+
+  // Message-channels settings section: registers a `settings.section` page
+  // when the settings scope service is available (composed by ui-settings).
+  applyMessageChannelsSection(ctx)
+
+  // Tasks view: registers the 会话页「任务」tab (records user inputs).
+  applyTasksView(ctx)
+
+  // Main session entry: fixed sidebar footer button opening the main session.
+  applyMainSessionEntry(ctx)
 }
