@@ -11,6 +11,9 @@ export type DesktopShellMode = 'compatibility' | 'advanced'
 /** Electron appearance source used by native frame and material rendering. */
 export type DesktopThemeSource = 'system' | 'light' | 'dark'
 
+/** Locale identifiers shared by the Web client and native desktop tray. */
+export type DesktopLocale = 'zh' | 'en'
+
 /** Window values resolved from the desktop-shell Cordis row. */
 export interface DesktopWindowConfig {
   /** Native presentation mode selected before BrowserWindow construction. */
@@ -126,6 +129,8 @@ export interface DesktopShellSpec extends DesktopWindowConfig {
   iconPath: string
   /** Generated tray assets derived from the repository-owned SVG. */
   trayIcons: DesktopTrayIcons
+  /** Read the explicit Host-backed locale after all profile plugins settle. */
+  readLocalePreference(): DesktopLocale | undefined
   /** Read the authoritative built-in theme preference after Host boot settles. */
   readThemeSource(): DesktopThemeSource
   /** Request Cordis teardown followed by native application exit. */
@@ -138,6 +143,9 @@ export interface DesktopShellSpec extends DesktopWindowConfig {
 export interface DesktopRuntime {
   /** Current Electron platform. */
   readonly platform: DesktopPlatform
+
+  /** Locale currently used for native tray contributions. */
+  readonly locale: DesktopLocale
 
   /** Native network, update-download, and notification adapter. */
   readonly updates: DesktopUpdateAdapter
@@ -160,6 +168,9 @@ export interface DesktopRuntime {
   /** Reveal and focus the current window, if mounted. */
   show(): void
 
+  /** Request native attention for background activity while the window is unfocused. */
+  notifyAttention(notification: DesktopNotification): void
+
   /**
    * Contribute one command to the native tray for the current Cordis lifetime.
    * @param item - dynamic label, state, and invocation owned by the caller.
@@ -170,8 +181,20 @@ export interface DesktopRuntime {
   /** Open a native terminal containing packaged DSH command shims. */
   openTerminal(): void
 
+  /** Export a diagnostics zip and reveal it in the system file manager. */
+  exportDiagnostics(): Promise<void>
+
+  /** Open the desktop operating system's native workspace-folder chooser. */
+  pickDirectory(): Promise<string | null>
+
+  /** Confirm that one renderer-selected workspace is safe to persist. */
+  validateDirectory(path: string): Promise<boolean>
+
   /** Accept the terminal client Loader outcome for the mounted generation. */
   reportRendererBoot(report: RendererBootReport): void
+
+  /** Apply an explicit locale, or fall back to Electron's application locale. */
+  setLocalePreference(preference: DesktopLocale | undefined): void
 
   /** Apply a built-in theme preference to Electron's native appearance. */
   setThemeSource(source: DesktopThemeSource): void
