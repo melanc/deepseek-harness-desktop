@@ -79,10 +79,6 @@
       "types": "./lib/types/main-session.d.ts",
       "default": "./lib/main-session.js"
     },
-    "./tal-gateway": {
-      "types": "./lib/types/tal-gateway/index.d.ts",
-      "default": "./lib/tal-gateway.js"
-    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -240,7 +236,6 @@
     "@deepseek-ai/dsh-web-app": "0.1.0-rc.7",
     "@deepseek-ai/dsh-workflow": "0.1.0-rc.7",
     "@deepseek-ai/schemastery": "^3.18.1",
-    "@earendil-works/pi-ai": "0.82.1",
     "@larksuiteoapi/node-sdk": "^1.65.0",
     "adm-zip": "^0.6.0",
     "dsh-community-market": "0.1.0-dev.0",
