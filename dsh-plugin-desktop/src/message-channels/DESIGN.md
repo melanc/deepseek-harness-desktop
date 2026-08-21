@@ -18,7 +18,7 @@
 | 通道 | 收发 | 实现 |
 |------|------|------|
 | WeCom 企业微信智能机器人 | 双向 | WebSocket 长连接（`aibot_*` JSON 协议），纯 `ws` 实现，零外部 SDK |
-| Feishu 飞书机器人 | 出站 | HTTP REST（tenant_access_token + im/v1/messages）；入站 WS 需 lark SDK（PbFrame protobuf），暂缓 |
+| Feishu 飞书机器人 | 双向 | WS 长连接入站（官方 lark SDK WSClient）+ HTTP REST 出站 |
 
 ---
 
@@ -50,7 +50,7 @@ MessageDispatcher ──→ ctx.agents.get(targetSessionId)
 src/message-channels/
   types.ts           共享类型：config schema、InboundMessage、ReplyHandle、MessageChannelAdapter、MESSAGE_CHANNELS_NS
   wecom-channel.ts   WeCom 企业微信机器人 WebSocket 适配器（aibot_* JSON 协议）
-  feishu-channel.ts  Feishu 飞书机器人适配器（v1 出站 HTTP + token 管理）
+  feishu-channel.ts  Feishu 飞书机器人适配器（双向：WS 长连接入站 + HTTP 出站）
   dispatcher.ts      入站分发：路由到 target agent + 回复捕获
   index.ts           Host 插件：settings namespace + 通道生命周期 + ctx.messageChannels service
 
@@ -74,7 +74,7 @@ MessageChannelsConfig = {
 ```
 
 - **生命周期**：`ctx.effect()` 启动所有通道 → 停用时 stop。
-- **配置热更新**：`scope.watch()` → 所有通道 `reconnectWithConfig()`（WeCom 重连 WS；Feishu 清 token 缓存）。
+- **配置热更新**：`scope.watch()` → 所有通道 `reconnectWithConfig()`（WeCom/Feishu 重连 WS + 清 token 缓存）。
 - **Service** `ctx.messageChannels`（`MessageChannelsService`，extends Service）：
 
 ```ts
@@ -112,7 +112,11 @@ v1 仅出站：
 - **token 管理**：`tenant_access_token` 按 appId 缓存，过期前 60s 刷新，`99991668/99991663`（token 失效）时失效重试；
 - **发送**：`POST /im/v1/messages?receive_id_type=chat_id`。
 
-**入站暂缓**：飞书 WebSocket 长连接用 PbFrame protobuf 帧，官方 `@larksuiteoapi/node-sdk` 的 WSClient 处理编解码。无 SDK 时可靠实现协议不在 v1 范围。`MessageChannelAdapter` 接口已支持入站（`start(emit)`），后续包一层 SDK WSClient 即可接入。
+**入站（已实现）**：使用官方 `@larksuiteoapi/node-sdk` 的 `WSClient`（处理 PbFrame protobuf 编解码、心跳、自动重连、消息分片重组），与 DevX `feishu-bot.source.ts` 同构：
+
+- `start(emit)` 创建 WSClient + `EventDispatcher`，注册 `im.message.receive_v1`；
+- 事件解析（sender/chat/text）→ 规范化 `InboundMessage` + `ReplyHandle` → 交给 dispatcher；
+- 出站复用 HTTP REST（tenant_access_token + im/v1/messages）。
 
 ---
 

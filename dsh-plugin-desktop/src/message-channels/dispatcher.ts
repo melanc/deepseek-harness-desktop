@@ -81,11 +81,15 @@ export class MessageDispatcher {
       return
     }
 
-    // Prefix sender name for group chats so the AI knows who is speaking.
+    // Direct messages are rendered as ordinary user messages (same as typing
+    // in the conversation box): user source, no channel prefix. Group chats
+    // keep the sender prefix so the AI knows who is speaking.
     const messageText =
       msg.chatType === 'group' && msg.fromName
         ? `[${msg.fromName}] ${msg.body}`
-        : msg.body
+        : msg.chatType === 'group'
+          ? `[${msg.body}]`
+          : msg.body
 
     console.log(
       `${LOG_TAG} Routing: channel=${msg.channel}, chatId=${msg.chatId}, ` +
@@ -108,9 +112,12 @@ export class MessageDispatcher {
     })
 
     // Inject via followup (wakes an idle agent as a next-turn input).
+    // User source renders the message like the user typed it themselves.
     const userMessage = createUserMessage({
       content: [{ type: 'text', text: messageText }],
-      source: { kind: 'plugin', plugin: 'message-channels' },
+      source: msg.chatType === 'group'
+        ? { kind: 'plugin', plugin: 'message-channels' }
+        : { kind: 'user' },
     })
     try {
       agent.followup(userMessage)

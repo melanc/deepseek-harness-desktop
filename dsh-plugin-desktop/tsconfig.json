@@ -14,6 +14,7 @@
     "outDir": "lib/types",
     "declaration": true,
     "emitDeclarationOnly": true,
+    "skipLibCheck": true,
     "strict": true,
     "exactOptionalPropertyTypes": true,
     "noFallthroughCasesInSwitch": true,
@@ -31,6 +32,8 @@
     "src/message-channels/**/*.ts",
     "src/message-channels/**/*.tsx",
     "src/main-session/**/*.ts",
-    "src/main-session/**/*.tsx"
+    "src/main-session/**/*.tsx",
+    "src/tal-gateway/**/*.ts",
+    "src/tal-gateway/**/*.tsx"
   ]
 }

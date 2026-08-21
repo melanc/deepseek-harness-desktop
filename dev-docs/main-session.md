@@ -59,27 +59,30 @@ dsh-plugin-desktop/tests/
 - 通过主会话专属 persona（`persona.ts` 注册的 system prompt 段）强制这一行为。
 
 **设计要点**：
-- 主会话 = root agent，固定 id `main-session`，**惰性创建**（首次使用时 `ctx.agents.create()`）；
+- 主会话 = root agent，固定 id `main-session`，**惰性创建**（首次使用时 `ctx.agents.create()`，之后重启通过 `ctx.agents.resume()` 从持久化恢复，历史延续）；
 - 编排工具 + persona 都注册在**主 agent 的 scope**（`agent.ctx`），只有主会话能看到；
 - `workspace_create_session` 流程：解析目录（显式路径或 `~/.dsh/workspaces/<title>/` 自动创建）→ `workspaceRegistry.create(path, title)` → `agents.create({ meta: { cwd } })` → `attachSession()` 挂载 → `followup()` 发布任务；
 - 消息注入用 `createUserMessage` + `agent.followup()`，source 标记 `main-session`；
 - 依赖通过 `ctx.get()` 动态解析（agents/sessions 静态注入；workspaceRegistry/sessionQuery 可选，缺失时降级）。
 
+**主会话的工作区归属（关键修复）**：
+- 主会话 cwd 固定为 `~/.dsh/main-session/`（`MAIN_SESSION_CWD_NAME`），插件激活时把该目录注册为专用工作区「主会话」并 `attachSession`，因此主会话**不会落入「未分组」**，侧边栏会话列表能直接打开它；
+- **必须用 `agents.resume` 而非 `agents.create` 恢复已持久化的主会话**：`create` 构造的是空 seed 的全新会话，持久化后端发现同 id 已有日志时拒绝（seed 无法覆盖已存前缀），导致主会话 live 但永不落盘、`attachSession` 也失败（读不到持久化 header）——重启后仍停在「未分组」。`resume` 会加载日志重建 seed，采纳成功；`isMainSessionPersisted()`（读 `sessionPersistence.list()`）决定走 resume 还是 create；
+- setup 中 best-effort 加入部署默认 agent preset（`agentPresets.resolve() + mount()`，与 Web host 一致），避免工具/persona 解析到空全局层（消除 `agent-presets` 警告）。
+
 ---
 
 ## 3. 使用方式
 
-### 3.1 主会话入口（侧边栏底部按钮）
+### 3.1 主会话入口（工作区「主会话」下的常驻会话）
 
-主会话在**侧边栏底部**（footer 操作区，设置按钮旁）有固定入口「主会话」按钮（⌂）：
+主会话挂在**专用工作区「主会话」**下，启动后常驻侧边栏会话列表（无需独立入口按钮）：
 
-- **位置**：首页侧边栏底部 `sidebar.footer.action` slot（order 100，排在 Cordis 插件面板之后）；
-- **点击行为**：打开系统级主会话（session id `main-session`）；
-- **主 agent 生命周期**：Host 插件**激活时创建**（不再纯惰性），保证入口点击时主会话已 live；
-- 与工作区列表分离，体现"系统级统一入口"定位；
-- **布局**：入口渲染为整行块（与 Cordis 面板同风格、同高），垂直堆叠不冲突——修复了与插件面板同排挤压导致图标消失的问题。
+- **归属**：插件激活时把 `~/.dsh/main-session/` 注册为工作区「主会话」并 `attachSession`，主会话作为该工作区下的第一个会话显示，展开「主会话」工作区即可打开；
+- **主 agent 生命周期**：Host 插件**激活时创建**（不再纯惰性），保证列表里主会话始终 live；
+- **布局**：侧边栏 footer 不再有独立主会话按钮（已移除）；footer 保留插件市场与 Cordis 面板，二者仍垂直堆叠（column 修复保留，避免整行组件互相挤压）。
 
-**使用流程**：打开 DSH Desktop → 侧边栏底部点击「主会话」→ 进入系统级主会话，发布任务即可，无需切换工作区。
+**使用流程**：打开 DSH Desktop → 侧边栏「主会话」工作区 → 点击主会话 → 进入系统级主会话，发布任务即可，无需切换工作区。
 
 ### 3.2 在主会话中发布任务
 
@@ -112,8 +115,8 @@ dsh-plugin-desktop/tests/
 
 ## 5. 后续迭代（Roadmap）
 
-- [ ] 主会话持久化恢复（`ctx.agents.resume`，重启后历史延续）
+- [x] 主会话持久化恢复（`ctx.agents.resume`，重启后历史延续）
 - [ ] sendMessage 对非 live 会话自动恢复
 - [ ] awaitReply 支持多轮对话（连续收发）
-- [ ] 主会话 UI 入口（设置页/侧边栏）
+- [x] 主会话 UI 入口（挂在专用工作区「主会话」下常驻会话列表）
 - [ ] 权限边界：主会话可管理的会话范围

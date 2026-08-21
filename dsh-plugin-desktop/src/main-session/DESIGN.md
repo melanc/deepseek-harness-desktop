@@ -49,9 +49,10 @@
 
 | 点 | 决策 |
 |----|------|
-| 主会话身份 | 固定 session id `main-session`，root agent（非任何 workspace 的成员） |
-| 创建时机 | **惰性**：首次调用 `ensureMainAgent()` 时通过 `ctx.agents.create()` 创建；已 live 则复用 |
-| 工具作用域 | 三个编排工具注册在**主 agent 的 scope**（`agent.ctx`），只有主会话能看到它们 |
+| 主会话身份 | 固定 session id `main-session`，root agent（挂在专用工作区「主会话」下） |
+| 主会话 cwd | **专用系统目录** `~/.dsh/main-session/`（DSH home 下，**不是** workspace 路径）——保证 session.list 可发现/可打开，同时作为其专属工作区路径 |
+| 创建时机 | **激活时创建**：插件 apply 的 effect 里 `getMainAgent()`（不再是纯惰性），保证会话列表里主会话始终 live |
+| 工具作用域 | 四个编排工具注册在**主 agent 的 scope**（`agent.ctx`），只有主会话能看到它们 |
 | 消息注入 | `createUserMessage` + `agent.followup()`（与 message-channels 相同的注入路径，source 标记 `main-session`） |
 | 回复收集 | 记录注入前 `session.seq`，轮询 `deriveMessages()` 找 seq 之后的最新 assistant 文本（500ms 间隔，默认 5min 超时） |
 
@@ -203,7 +204,7 @@ DSH 的 service 类型声明未发布，desktop 插件按既有惯例用 `ctx.ge
 
 ## 9. 使用方式
 
-主会话是普通 DSH agent（固定 id `main-session`），首次使用由插件惰性创建。打开主会话后，模型自动拥有三个编排工具。对主会话说：
+主会话是普通 DSH agent（固定 id `main-session`），挂在专用工作区「主会话」下，启动后常驻会话列表。打开主会话后，模型自动拥有四个编排工具。对主会话说：
 
 > "查看各工作区会话在做什么，把'重构订单模块'这个任务发给负责的会话，等它完成并汇报结果。"
 
@@ -213,8 +214,8 @@ DSH 的 service 类型声明未发布，desktop 插件按既有惯例用 `ctx.ge
 
 ## 10. 后续迭代（Roadmap）
 
-- [ ] **会话恢复**：`ensureMainAgent` 支持从持久化恢复（`ctx.agents.resume`），重启后主会话历史延续；
+- [x] **会话恢复**：`ensureMainAgent` 支持从持久化恢复（`ctx.agents.resume`），重启后主会话历史延续；
 - [ ] **自动恢复目标会话**：sendMessage 遇到非 live 会话时自动 `agents.resume`（从持久化恢复）；
 - [ ] **结果回传增强**：awaitReply 支持多轮对话（连续收发）；
-- [ ] **UI**：主会话入口（设置页或侧边栏固定项）；
+- [x] **UI**：主会话挂在专用工作区「主会话」下常驻会话列表（不再需要侧边栏独立入口按钮）；
 - [ ] **权限边界**：明确主会话可管理的会话范围（全部 vs 指定工作区）。

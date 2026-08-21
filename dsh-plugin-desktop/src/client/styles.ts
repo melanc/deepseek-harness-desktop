@@ -53,3 +53,25 @@ export function installAdvancedStyles(): () => void {
   document.head.appendChild(style)
   return () => { style.remove() }
 }
+
+/**
+ * The upstream sidebar footer (`footerActions`) is a horizontal flex row, but
+ * every occupant is a full-row component — the market launcher (42px) and the
+ * Cordis panel (42px). Under flex-row they squeeze each other sideways, so
+ * override to a vertical column that stacks each occupant on its own row.
+ * @returns the style disposer.
+ */
+const SIDEBAR_FOOTER_STYLES = `
+  [class*="footerActions"] { flex-direction: column; align-items: stretch; }
+  [class*="footerActions"] > * { width: 100%; }
+`
+
+/** Install and remove the sidebar footer stacking fix. @returns the style disposer. */
+export function installSidebarFooterStyles(): () => void {
+  const style = document.createElement('style')
+  style.dataset.plugin = 'dsh-plugin-desktop'
+  style.dataset.pluginCss = 'dsh-plugin-desktop/sidebar-footer'
+  style.textContent = SIDEBAR_FOOTER_STYLES
+  document.head.appendChild(style)
+  return () => { style.remove() }
+}

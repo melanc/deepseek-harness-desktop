@@ -39,10 +39,5 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
      * the upstream conversation.view slot contract.
      */
     'conversation.view': { kind: 'list'; scope: 'session'; owner: Record<never, never> }
-    /**
-     * Upstream sidebar footer action buttons (settings, plugin panel).
-     * Desktop adds the fixed 主会话 entry here.
-     */
-    'sidebar.footer.action': { kind: 'list'; scope: 'root' }
   }
 }

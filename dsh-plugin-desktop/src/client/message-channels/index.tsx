@@ -59,6 +59,10 @@ interface SettingsScopeBinder {
 interface SessionRow {
   sessionId: string
   cwd?: string
+  /** Projection baseline; the `title` key carries the session's display title. */
+  projections?: {
+    values?: Record<string, unknown>
+  }
 }
 
 /** Minimal `session.list` response envelope. */
@@ -73,6 +77,35 @@ interface SessionListResult {
 /** Minimal sessions api surface resolved from the connection service. */
 interface SessionsApi {
   list(request: { cursor?: string }): Promise<SessionListResult>
+}
+
+/** One redacted secret slot from settings.describe. */
+interface SecretSlot {
+  /** Field path inside the namespace section, e.g. ['wecomBot', 'secret']. */
+  path: string[]
+  /** Whether the secret currently holds a value. */
+  set: boolean
+}
+
+/** Minimal settings api surface resolved from the connection service. */
+interface SettingsApi {
+  describe(request: Record<string, never>): Promise<{
+    result: {
+      ok: boolean
+      value?: {
+        namespaces?: Array<{
+          ns: string
+          secrets?: SecretSlot[]
+        }>
+      }
+    }
+  }>
+}
+
+/** Connection api surface (sessions + settings). */
+interface ConnectionApi {
+  sessions?: SessionsApi
+  settings?: SettingsApi
 }
 
 /** Dropdown option for one target session. */
@@ -105,8 +138,30 @@ export function applyMessageChannelsSection(ctx: ClientContext): void {
     inject: () => ({
       scope: binder.bind({ namespace: MESSAGE_CHANNELS_NS }),
       listSessions,
+      describeSecrets,
     }),
   }, MessageChannelsSection))
+
+  /**
+   * Read the write-only secret slots for the message-channels namespace.
+   * DSH redacts secret values on every read; this returns which secret
+   * fields are currently configured (set: true) so the form can show a
+   * "已配置" marker instead of a blank box.
+   * @returns secret slots for this namespace, keyed by joined path.
+   */
+  async function describeSecrets(): Promise<Record<string, boolean>> {
+    const connection = ctx.get('connection') as { api?: ConnectionApi } | undefined
+    const settings = connection?.api?.settings
+    if (settings === undefined) return {}
+    const response = await settings.describe({})
+    if (!response.result.ok || response.result.value === undefined) return {}
+    const ns = response.result.value.namespaces?.find((n) => n.ns === MESSAGE_CHANNELS_NS)
+    const slots: Record<string, boolean> = {}
+    for (const secret of ns?.secrets ?? []) {
+      slots[secret.path.join('.')] = secret.set
+    }
+    return slots
+  }
 
   /**
    * Load all persisted sessions for the target-session dropdown, newest
@@ -126,9 +181,21 @@ export function applyMessageChannelsSection(ctx: ClientContext): void {
     const items = response.result.value.items ?? []
     return items.map((row) => ({
       sessionId: row.sessionId,
-      label: basename(row.cwd) || row.sessionId,
+      label: sessionLabel(row),
     }))
   }
+}
+
+/**
+ * Best display label for a session: the projection title (user-facing
+ * session name), then the workspace basename, then the session id.
+ */
+function sessionLabel(row: SessionRow): string {
+  const title = row.projections?.values?.title
+  if (typeof title === 'string' && title.trim() !== '') return title
+  const base = basename(row.cwd)
+  if (base !== '') return base
+  return row.sessionId
 }
 
 /** Last path segment of a workspace path; empty for missing/unparseable paths. */
@@ -138,6 +205,43 @@ function basename(cwd: string | undefined): string {
   return parts[parts.length - 1] ?? ''
 }
 
+/** Secret field paths under each channel object (never round-trip to the client). */
+const SECRET_FIELDS: Record<string, string> = {
+  wecomBot: 'secret',
+  feishuBot: 'appSecret',
+}
+
+/**
+ * Merge an incoming settings snapshot into local state while preserving
+ * locally-edited secret values.
+ *
+ * DSH settings redact `role('secret')` fields on every read (`describe`
+ * strips them), so a subscribe after a write would reset the secret input
+ * to empty — making it look like the field cannot be typed into. This merge
+ * keeps the local secret draft for each channel while adopting all other
+ * (non-secret) fields from the snapshot.
+ */
+function mergePreservingSecrets(
+  prev: Record<string, unknown>,
+  next: Record<string, unknown>,
+): Record<string, unknown> {
+  const merged: Record<string, unknown> = { ...next }
+  for (const [channelKey, secretField] of Object.entries(SECRET_FIELDS)) {
+    const prevChannel = prev[channelKey]
+    if (typeof prevChannel === 'object' && prevChannel !== null) {
+      const secretDraft = (prevChannel as Record<string, unknown>)[secretField]
+      if (secretDraft !== undefined && secretDraft !== '') {
+        const nextChannel = merged[channelKey]
+        merged[channelKey] = {
+          ...(typeof nextChannel === 'object' && nextChannel !== null ? nextChannel as Record<string, unknown> : {}),
+          [secretField]: secretDraft,
+        }
+      }
+    }
+  }
+  return merged
+}
+
 // ============================================================
 // Section component
 // ============================================================
@@ -145,19 +249,34 @@ function basename(cwd: string | undefined): string {
 interface SectionProps {
   scope: SettingsScope
   listSessions: () => Promise<SessionOption[]>
+  describeSecrets: () => Promise<Record<string, boolean>>
 }
 
-function MessageChannelsSection({ scope, listSessions }: SectionProps): JSX.Element {
+function MessageChannelsSection({ scope, listSessions, describeSecrets }: SectionProps): JSX.Element {
   const [value, setValue] = React.useState<Record<string, unknown>>(scope.getSnapshot().value ?? {})
   const [sessions, setSessions] = React.useState<SessionOption[]>([])
   const [sessionsLoaded, setSessionsLoaded] = React.useState(false)
   const [manualMode, setManualMode] = React.useState(false)
+  /** Joined secret path → whether it currently holds a value. */
+  const [secretConfigured, setSecretConfigured] = React.useState<Record<string, boolean>>({})
 
   React.useEffect(() => {
     return scope.subscribe(() => {
-      setValue(scope.getSnapshot().value ?? {})
+      const next = scope.getSnapshot().value ?? {}
+      setValue((prev) => mergePreservingSecrets(prev, next))
     })
   }, [scope])
+
+  React.useEffect(() => {
+    let cancelled = false
+    describeSecrets()
+      .then((slots) => {
+        if (cancelled) return
+        setSecretConfigured(slots)
+      })
+      .catch(() => { /* ignore — marker is best-effort */ })
+    return () => { cancelled = true }
+  }, [describeSecrets])
 
   React.useEffect(() => {
     let cancelled = false
@@ -251,6 +370,15 @@ function MessageChannelsSection({ scope, listSessions }: SectionProps): JSX.Elem
           line-height: 1.5;
         }
         .mc-field input::placeholder { color: var(--dsw-alias-label-tertiary); }
+        .mc-field label { display: flex; align-items: center; gap: 6px; }
+        .mc-secret-badge {
+          font-size: 10px;
+          line-height: 16px;
+          padding: 0 6px;
+          border-radius: 999px;
+          background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 12%, transparent);
+          color: var(--dsw-alias-state-success-primary);
+        }
         .mc-session-hint { font-size: 12px; color: var(--dsw-alias-label-tertiary); }
         .mc-toggle { display: flex; flex-direction: row; align-items: center; gap: 8px; margin-bottom: 8px; color: var(--dsw-alias-label-primary); }
       `}</style>
@@ -290,10 +418,16 @@ function MessageChannelsSection({ scope, listSessions }: SectionProps): JSX.Elem
           />
         </div>
         <div className="mc-field">
-          <label>{field2Label}</label>
+          <label>
+            {field2Label}
+            {secretConfigured[`${key}.${key === 'wecomBot' ? 'secret' : 'appSecret'}`] === true && (
+              <span className="mc-secret-badge">已配置</span>
+            )}
+          </label>
           <input
             type="password"
             value={(cfg[key === 'wecomBot' ? 'secret' : 'appSecret'] as string) ?? ''}
+            placeholder={secretConfigured[`${key}.${key === 'wecomBot' ? 'secret' : 'appSecret'}`] === true ? '已配置，重新输入可覆盖' : ''}
             onChange={(e) => setCfg({ [key === 'wecomBot' ? 'secret' : 'appSecret']: e.target.value })}
           />
         </div>

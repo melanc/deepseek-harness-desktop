@@ -8,6 +8,112 @@
  */
 
 // ============================================================
+// User memory (semantic memory layer)
+// ============================================================
+
+/** Kind of one durable user fact. */
+export type MemoryFactType = 'profile' | 'preference' | 'decision' | 'background'
+
+/** One durable user fact row in the JSONL memory log. */
+export interface MemoryFact {
+  /** Fact kind; drives the overwrite rule and the summary rendering. */
+  readonly type: MemoryFactType
+  /** Stable fact key (e.g. `name`, `reply-style`, `api-arch`). */
+  readonly key: string
+  /** Free-text fact value. */
+  readonly value: string
+  /** Epoch ms when the fact was written. */
+  readonly updatedAt: number
+  /** Optional provenance note (e.g. which delegation produced a decision). */
+  readonly source?: string
+}
+
+/** Result of writing one memory fact. */
+export interface MemoryWriteResult {
+  readonly success: boolean
+  readonly fact?: MemoryFact
+  readonly error?: string
+}
+
+/** Result of reading memory facts. */
+export interface MemoryReadResult {
+  readonly facts: MemoryFact[]
+  readonly complete: boolean
+  readonly error?: string
+}
+
+/**
+ * How the memory log is rendered into the main session's prompt: the loaded
+ * profile/preference/background lines plus recent decisions, truncated to a
+ * budget so the memory section never dominates the assembly.
+ */
+export interface MemorySummary {
+  /** Rendered prompt-section text (empty when nothing is stored yet). */
+  readonly text: string
+  /** Number of facts the summary was rendered from. */
+  readonly factCount: number
+}
+
+/** Default character budget for the rendered memory prompt section. */
+export const DEFAULT_MEMORY_SUMMARY_CHARS = 2000
+
+/**
+ * Memory log file name under the main session cwd's `memory/` directory.
+ * JSONL: append-only, one {@link MemoryFact} per line, newest wins per key.
+ */
+export const USER_FACTS_FILE = 'user-facts.jsonl'
+
+/** Soft cap on stored facts; beyond it writes still land but the summary warns. */
+export const MEMORY_FACT_LIMIT = 5000
+
+// ============================================================
+// Procedure memory (procedural/SOP memory layer)
+// ============================================================
+
+/** One durable, reusable procedure (SOP) row in the procedures JSONL log. */
+export interface Procedure {
+  /** Stable procedure key (e.g. `order-refactor`). */
+  readonly key: string
+  /** Human-readable display name (e.g. 订单模块重构). */
+  readonly name: string
+  /** Trigger-scenario description; matched when a task arrives. */
+  readonly trigger: string
+  /** Ordered execution steps. */
+  readonly steps: readonly string[]
+  /** Completion standard ("what done looks like"). */
+  readonly output: string
+  /** Optional common pitfalls. */
+  readonly pitfalls?: readonly string[]
+  /** Times the procedure has been saved/reused (evolution signal). */
+  readonly runCount: number
+  /** Epoch ms of the last save/update. */
+  readonly updatedAt: number
+}
+
+/** Result of saving one procedure. */
+export interface ProcedureSaveResult {
+  readonly success: boolean
+  readonly procedure?: Procedure
+  readonly error?: string
+}
+
+/** Result of recalling procedures. */
+export interface ProcedureRecallResult {
+  readonly procedures: Procedure[]
+  readonly complete: boolean
+  readonly error?: string
+}
+
+/** Procedure log file name under the main session cwd's `memory/` directory. */
+export const PROCEDURES_FILE = 'procedures.jsonl'
+
+/** Soft cap on stored procedures; beyond it saves still land but list warns. */
+export const PROCEDURE_LIMIT = 500
+
+/** Default character budget for the rendered procedure list section. */
+export const DEFAULT_PROCEDURE_LIST_CHARS = 1500
+
+// ============================================================
 // Session enumeration
 // ============================================================
 
@@ -117,11 +223,59 @@ export interface CreateWorkspaceSessionResult {
 }
 
 // ============================================================
+// Session activity log (dispatch ledger)
+// ============================================================
+
+/** Lifecycle status of one delegated task. */
+export type SessionActivityStatus = 'running' | 'completed' | 'failed' | 'timeout'
+
+/** One delegated-task activity row in the session-activity JSONL log. */
+export interface SessionActivity {
+  /** Target workspace session id. */
+  readonly sessionId: string
+  /** Workspace the session belongs to, when attached. */
+  readonly workspaceId?: string
+  /** Workspace display title, when attached. */
+  readonly workspaceName?: string
+  /** The delegated task text. */
+  readonly task: string
+  /** Task lifecycle status. */
+  readonly status: SessionActivityStatus
+  /** Result summary (from the awaited reply), when available. */
+  readonly summary?: string
+  /** Epoch ms when the task was delegated. */
+  readonly startedAt: number
+  /** Epoch ms when the task finished (completed/failed/timeout). */
+  readonly completedAt?: number
+}
+
+/** Result of querying the session activity log. */
+export interface SessionActivityResult {
+  readonly activities: SessionActivity[]
+  readonly complete: boolean
+  readonly error?: string
+}
+
+/** Session-activity log file name under the main session cwd's `memory/` dir. */
+export const SESSION_ACTIVITY_FILE = 'session-activity.jsonl'
+
+/** Default limit for {@link SessionActivityResult.activities}. */
+export const DEFAULT_ACTIVITY_LIMIT = 20
+
+// ============================================================
 // Constants
 // ============================================================
 
 /** Fixed session id for the system-level main session. */
 export const MAIN_SESSION_ID = 'main-session'
+
+/**
+ * Working directory for the main session. A dedicated directory under the
+ * DSH home — deliberately NOT the workspace root or any workspace path, so
+ * the main session is never grouped under a workspace in the sidebar (it is
+ * a system-level session, not a workspace session).
+ */
+export const MAIN_SESSION_CWD_NAME = 'main-session'
 
 /** Plugin name for the main-session feature. */
 export const MAIN_SESSION_PLUGIN = 'main-session'

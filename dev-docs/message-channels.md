@@ -17,7 +17,7 @@
 dsh-plugin-desktop/src/message-channels/
   types.ts           共享类型：config schema、InboundMessage、ReplyHandle、MessageChannelAdapter
   wecom-channel.ts   企业微信智能机器人 WebSocket 适配器（aibot_* JSON 协议，双向）
-  feishu-channel.ts  飞书机器人适配器（v1 出站 HTTP + token 管理）
+  feishu-channel.ts  飞书机器人适配器（双向：WS 长连接入站 + HTTP 出站）
   dispatcher.ts      入站分发：路由到目标 agent + 回复捕获
   index.ts           Host 插件：settings namespace + 通道生命周期 + ctx.messageChannels service
   DESIGN.md          设计文档
@@ -46,13 +46,18 @@ dsh-plugin-desktop/src/ws.d.ts
 | 通道 | 收发 | 实现 |
 |------|------|------|
 | 企业微信智能机器人 | **双向** | WebSocket 长连接（`aibot_*` JSON 协议），纯 `ws` 实现，零外部 SDK |
-| 飞书机器人 | 出站 | HTTP REST（tenant_access_token + im/v1/messages） |
+| 飞书机器人 | **双向** | WS 长连接入站（官方 lark SDK WSClient）+ HTTP REST 出站 |
 | 入站路由 | — | 消息 → `agent.followup()` 注入 DSH agent 会话 → assistant 回复自动发回 IM |
 
+**消息显示与回执**：
+- **单聊消息以 `user` source 注入**——在对话页渲染成普通用户消息，与在会话框直接输入完全一致（无通道前缀）；
+- **群聊消息保留 `[发送者名]` 前缀**（plugin source），让 AI 知道谁在说话；
+- 收到飞书消息后自动回复 **🔥 Fire reaction**（`im/v1/messages/{id}/reactions`），确认已收到（fire-and-forget，失败仅记日志）。
+
 **v1 限制**：
-- 飞书入站（WebSocket 长连接 PbFrame）需 lark SDK，暂缓；
 - 要求目标会话有 live agent（不自动创建会话）；
-- Client 状态展示/测试按钮需 Host RPC 通道，暂缓。
+- Client 状态展示/测试按钮需 Host RPC 通道，暂缓；
+- **Secret 字段是 write-only**：DSH settings 对 `role('secret')` 字段每次读取都脱敏（`describe` 剥离），client **无法读回已保存的 secret 值**——输入框始终为空属正常（重新输入即覆盖）。表单通过 `describe` 的 `secrets` slot 列表检测字段是否已配置，**已配置时显示「已配置」徽标 + 占位提示**（"已配置，重新输入可覆盖"）。已修复"输入被回滚"问题：subscribe 合并时保留本地编辑中的 secret 草稿。
 
 ---
 
@@ -82,7 +87,7 @@ message-channels:
 
 - **企业微信机器人**：启用开关、Bot ID、Secret、（可选）WebSocket URL
 - **飞书机器人**：启用开关、App ID、App Secret
-- **目标会话 ID**：入站消息路由到的 DSH 会话 ID
+- **目标会话 ID**：入站消息路由到的 DSH 会话 ID。**下拉列表显示会话名字**（来自 `session.list` 的 projection title，优先于目录名/会话 ID），选项格式为「会话名（会话 ID）」；不在列表中的 ID（如主会话 `main-session`）可手动输入
 
 表单写入与 `settings.yaml` 相同的 `message-channels` namespace，二者等效。
 
@@ -137,7 +142,6 @@ corepack yarn workspace dsh-plugin-desktop verify:profile   # 插件生命周期
 
 ## 5. 后续迭代（Roadmap）
 
-- [ ] 飞书入站：封装 `@larksuiteoapi/node-sdk` WSClient 接入 `start(emit)`
 - [ ] Host RPC 通道：`ctx.messageChannels` service 暴露给 Client（状态/测试按钮）
 - [ ] 会话自动创建：目标会话不存在时自动 `ctx.agents.create()`
 - [ ] 通知通道（email/webhook 单向推送，对齐 DevX notify-channels）

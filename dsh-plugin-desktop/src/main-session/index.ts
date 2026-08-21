@@ -23,12 +23,22 @@ import { type Context, Service } from '@deepseek-ai/cordis'
 import { randomUUID } from 'node:crypto'
 import { mkdir, realpath } from 'node:fs/promises'
 import type { Agent, AgentHandle } from '@deepseek-ai/dsh-agent'
+import { installModelSelection, type ModelSelection, type ModelSelectionRef } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import { MAIN_SESSION_ID, LOG_TAG } from './types.ts'
+import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
+import { MAIN_SESSION_ID, MAIN_SESSION_CWD_NAME, MAIN_SESSION_PLUGIN, USER_FACTS_FILE, PROCEDURES_FILE, SESSION_ACTIVITY_FILE, LOG_TAG } from './types.ts'
+import { UserMemoryStore } from './memory.ts'
+import { registerUserMemorySection } from './memory-persona.ts'
+import { registerMemoryTools } from './memory-tools.ts'
+import { ProcedureStore } from './procedure.ts'
+import { registerProcedureSection } from './procedure-persona.ts'
+import { registerProcedureTools } from './procedure-tools.ts'
+import { SessionActivityStore } from './activity.ts'
+import { registerActivityTools } from './activity-tools.ts'
 import { MainSessionService, sessionIdOf } from './service.ts'
 import { registerMainSessionTools } from './tools.ts'
 import { registerMainSessionPersona } from './persona.ts'
-import { DEFAULT_WORKSPACES_ROOT, resolveDefaultWorkspacePath } from './workspace-path.ts'
+import { resolveDefaultWorkspacePath } from './workspace-path.ts'
 
 /** Stable Cordis plugin name. */
 export const name = 'main-session'
@@ -44,6 +54,20 @@ interface AgentsRegistry {
   get(sessionId: unknown): Agent | undefined
   list(): Agent[]
   create(options: Record<string, unknown>): Promise<AgentHandle>
+  resume(options: Record<string, unknown>): Promise<AgentHandle>
+}
+
+interface SessionPersistence {
+  list(): Promise<Array<{ id: unknown; cwd?: string }>>
+}
+
+interface AgentPresetsService {
+  resolve(id?: string): Promise<{ id: string }>
+  mount(agentCtx: Context, id: string): Promise<unknown>
+}
+
+interface AgentDefaultModelService {
+  currentSelection(): ModelSelection
 }
 
 interface SessionsStore {
@@ -52,7 +76,13 @@ interface SessionsStore {
 
 interface WorkspaceRegistry {
   list(): Array<{ id: string; title: string; sessionIds: unknown[] }>
-  create(path: string, title?: string): Promise<{ id: string; title: string }>
+  create(path: string, title?: string): Promise<WorkspaceEntity>
+}
+
+/** A workspace record returned by {@link WorkspaceRegistry.create}. */
+interface WorkspaceEntity {
+  id: string
+  title: string
   attachSession(sessionId: unknown): Promise<void>
 }
 
@@ -149,8 +179,30 @@ export class MainSessionServiceHost extends Service implements MainSessionServic
 export function apply(ctx: Context): void {
   const agents = ctx.get('agents') as unknown as AgentsRegistry
   const sessions = ctx.get('sessions') as unknown as SessionsStore
-  const workspaceRegistry = ctx.get('workspaceRegistry') as unknown as WorkspaceRegistry | undefined
   const sessionQuery = ctx.get('sessionQuery') as unknown as SessionQueryEngine | undefined
+  // The workspace registry is resolved lazily inside ensureMainAgent (not
+  // captured at apply time): the workspace service may not be published yet
+  // when this plugin's apply runs, and attach must observe the latest state.
+  const resolveWorkspaceRegistry = (): WorkspaceRegistry | undefined =>
+    ctx.get('workspaceRegistry') as unknown as WorkspaceRegistry | undefined
+
+  // User memory store: durable user facts under the main session cwd. The
+  // store mkdirs its own directory on first write, so no cwd resolution is
+  // needed here.
+  const memoryStore = new UserMemoryStore({
+    filePath: dshHomePath(MAIN_SESSION_CWD_NAME, 'memory', USER_FACTS_FILE),
+  })
+
+  // Procedure memory store: reusable multi-step SOPs, same directory.
+  const procedureStore = new ProcedureStore({
+    filePath: dshHomePath(MAIN_SESSION_CWD_NAME, 'memory', PROCEDURES_FILE),
+  })
+
+  // Session activity store: dispatch ledger (what each workspace session was
+  // asked to do and how it went), same directory.
+  const activityStore = new SessionActivityStore({
+    filePath: dshHomePath(MAIN_SESSION_CWD_NAME, 'memory', SESSION_ACTIVITY_FILE),
+  })
 
   // ── Main agent lifecycle (lazy) ─────────────────────────────────────────
   let handle: AgentHandle | undefined
@@ -159,29 +211,103 @@ export function apply(ctx: Context): void {
   const ensureMainAgent = async (): Promise<AgentHandle> => {
     if (handle !== undefined) return handle
     ensuring ??= (async () => {
-      const existing = agents.get(sessionIdOf(MAIN_SESSION_ID))
-      if (existing !== undefined) {
-        return { agent: existing, dispose: async () => {} } as AgentHandle
-      }
-      // Give the main session a cwd (the DSH default workspace root) so it
-      // is discoverable in session.list and persisted like any session.
-      let cwd = DEFAULT_WORKSPACES_ROOT
+      // Resolve the dedicated system cwd first (always, so an existing stale
+      // session can be re-anchored to the correct directory).
+      let cwd = dshHomePath(MAIN_SESSION_CWD_NAME)
       try {
         await mkdir(cwd, { recursive: true })
         cwd = await realpath(cwd)
       } catch (err) {
-        console.warn(`${LOG_TAG} default workspace root unavailable, creating main session without cwd:`, err)
+        console.warn(`${LOG_TAG} main session cwd unavailable, creating main session without cwd:`, err)
         cwd = ''
       }
-      const created = await agents.create({
-        sessionId: sessionIdOf(MAIN_SESSION_ID),
-        meta: cwd === '' ? {} : { cwd },
-        agentOptions: {},
-        setup: (agentCtx: Context) => {
-          registerMainSessionTools(agentCtx, innerService)
-          registerMainSessionPersona(agentCtx)
-        },
-      })
+
+      const mainSessionId = sessionIdOf(MAIN_SESSION_ID)
+      const existing = agents.get(mainSessionId)
+      let created: AgentHandle
+      if (existing !== undefined) {
+        // Reuse the live main agent. If it is anchored to a stale cwd (e.g.
+        // an earlier build pointed it at the workspace root), re-anchor it to
+        // the dedicated directory via the workspace registry.
+        console.log(`${LOG_TAG} reusing live main agent (cwd=${existing.session?.header?.cwd ?? 'n/a'})`)
+        created = { agent: existing, dispose: async () => {} } as AgentHandle
+      } else {
+        // Same scoped composition for both paths: the orchestrator tools and
+        // persona, plus (best-effort) the deployment's default agent preset so
+        // model-facing rows resolve against a real composition instead of the
+        // empty global layer. The model selection is installed exactly like the
+        // web host's `installSelection`: it binds the default provider/model
+        // into prompt assembly (`{{model}}`/`{{provider}}` variables) and into
+        // each request, so the standard preset's persona resolves.
+        const selection = createMainSelection(ctx)
+        const setup = async (agentCtx: Context): Promise<void> => {
+          try {
+            registerMainSessionTools(agentCtx, innerService)
+            registerUserMemorySection(agentCtx, memoryStore)
+            registerMemoryTools(agentCtx, memoryStore)
+            registerProcedureSection(agentCtx, procedureStore)
+            registerProcedureTools(agentCtx, procedureStore)
+            registerActivityTools(agentCtx, activityStore)
+            registerMainSessionPersona(agentCtx)
+            installModelSelection(agentCtx, selection)
+            const toolsRuntime = agentCtx.get('tools') as
+              | { schemas(scope?: unknown): Array<{ name: string }> }
+              | undefined
+            const visible = toolsRuntime?.schemas(agentCtx.agent)
+            ctx.logger.info(
+              `${LOG_TAG} main agent setup complete; visible tools: ${
+                visible === undefined ? 'n/a' : visible.map(tool => tool.name).join(',')
+              }`,
+            )
+            await joinDefaultAgentPreset(ctx, agentCtx)
+          } catch (err) {
+            ctx.logger.warn(`${LOG_TAG} main agent setup failed: ${String(err)}`)
+            throw err
+          }
+        }
+        const selected = selection.current
+        const agentOptions = selected === undefined ? {} : { ...selected }
+        const persisted = await isMainSessionPersisted(ctx)
+        created = persisted
+          ? await agents.resume({
+            resumeSessionId: mainSessionId,
+            agentOptions,
+            setup,
+          })
+          : await agents.create({
+            sessionId: mainSessionId,
+            meta: cwd === '' ? {} : { cwd },
+            agentOptions,
+            setup,
+          })
+      }
+
+      // Register the main session's cwd as a dedicated system workspace and
+      // attach the main session to it. This keeps the main session from
+      // landing in "未分组" and lets the conversation view open it without
+      // requiring a workspace pick (the workspace is always this one).
+      if (cwd !== '') {
+        const workspaceRegistry = resolveWorkspaceRegistry()
+        if (workspaceRegistry === undefined) {
+          ctx.logger.warn(`${LOG_TAG} workspace registry unavailable, main session stays ungrouped`)
+        } else {
+          try {
+            const ws = await workspaceRegistry.create(cwd, '主会话')
+            await ws.attachSession(sessionIdOf(MAIN_SESSION_ID))
+            ctx.logger.info(`${LOG_TAG} attached main session to system workspace "${ws.id}"`)
+          } catch (err) {
+            ctx.logger.warn(`${LOG_TAG} main session workspace attach failed: ${String(err)}`)
+          }
+        }
+      }
+
+      // A never-started session is "blank": the workspace browser hides blank
+      // sessions (only the currently opened one is shown), so a fresh main
+      // session would not appear under its workspace. Kick off one real turn
+      // so `turn/start` lands and the main session stays visible and
+      // resumable from its workspace entry.
+      void kickstartMainSessionIfBlank(ctx, created.agent)
+
       handle = created
       return created
     })()
@@ -193,7 +319,15 @@ export function apply(ctx: Context): void {
     ensureAgent: ensureMainAgent,
     getAgent: (id) => agents.get(sessionIdOf(id)),
     listLiveAgents: () => agents.list(),
+    recordActivityStart: (sessionId, task, workspace) => {
+      void activityStore.recordStart(sessionId, task, workspace)
+    },
+    recordActivityFinish: (sessionId, task, status, summary, workspace) => {
+      void activityStore.recordFinish(sessionId, task, status, summary, workspace)
+    },
+    taskTextOf: (sessionId) => activityStore.latestRunningTask(sessionId),
     listWorkspaceSessionIds: () => {
+      const workspaceRegistry = resolveWorkspaceRegistry()
       if (workspaceRegistry === undefined) return []
       try {
         const ids: string[] = []
@@ -207,6 +341,7 @@ export function apply(ctx: Context): void {
       }
     },
     workspaceOf: (id) => {
+      const workspaceRegistry = resolveWorkspaceRegistry()
       if (workspaceRegistry === undefined) return undefined
       try {
         for (const ws of workspaceRegistry.list()) {
@@ -241,6 +376,7 @@ export function apply(ctx: Context): void {
       }
     },
     createWorkspaceSession: async (options) => {
+      const workspaceRegistry = resolveWorkspaceRegistry()
       if (workspaceRegistry === undefined) {
         return { sessionId: '', error: 'workspaceRegistry is not available' }
       }
@@ -259,7 +395,7 @@ export function apply(ctx: Context): void {
       }
 
       // 1. Ensure the workspace exists (idempotent).
-      let ws: { id: string }
+      let ws: WorkspaceEntity
       try {
         ws = await workspaceRegistry.create(workspacePath, options.workspaceTitle)
       } catch (err) {
@@ -281,7 +417,7 @@ export function apply(ctx: Context): void {
           },
         })
         // 3. Attach to the workspace (validates header cwd against the path).
-        await workspaceRegistry.attachSession(sessionIdOf(newSessionId))
+        await ws.attachSession(sessionIdOf(newSessionId))
         // 4. Dispatch the initial task, if any.
         if (options.task !== undefined && options.task.trim() !== '') {
           const agent = agents.get(sessionIdOf(newSessionId))
@@ -326,3 +462,100 @@ export { MainSessionService, sessionIdOf } from './service.ts'
 export { registerMainSessionTools } from './tools.ts'
 export { registerMainSessionPersona } from './persona.ts'
 export { DEFAULT_WORKSPACES_ROOT, resolveDefaultWorkspacePath } from './workspace-path.ts'
+
+// ============================================================
+// Helpers
+// ============================================================
+
+/**
+ * Whether a session with the main session's id is already persisted.
+ *
+ * `agents.create` builds a fresh session with an empty seed; when a persisted
+ * log already exists for the id, the persistence backend rejects the fresh
+ * session (its seed cannot cover the stored prefix) and the main session is
+ * published live but never written — which also breaks `attachSession` (the
+ * workspace registry reads the header from persistence). A persisted session
+ * must be opened with `agents.resume`, which loads the log and reconstructs
+ * the seed so adoption succeeds. This mirrors the web host's cold-resume path.
+ * @param ctx - host context (for the optional `sessionPersistence` service).
+ * @returns true when a persisted log for `main-session` exists; false when
+ *   persistence is absent, listing fails, or the id is genuinely new.
+ */
+async function isMainSessionPersisted(ctx: Context): Promise<boolean> {
+  const persistence = ctx.get('sessionPersistence') as unknown as SessionPersistence | undefined
+  if (persistence === undefined) return false
+  try {
+    const rows = await persistence.list()
+    return rows.some(row => String(row.id) === MAIN_SESSION_ID)
+  } catch (err) {
+    console.warn(`${LOG_TAG} session persistence list failed, creating main session fresh:`, err)
+    return false
+  }
+}
+
+/**
+ * Build the main session's model selection ref from the deployment default
+ * (`agentDefaultModel`), detached from the settings source. Mirrors the web
+ * host's `selectionFor`: `installModelSelection` reads `current` at each
+ * prompt assembly, so a default saved later reaches the main session's next
+ * turn without a restart.
+ * @param ctx - host context (for the optional `agentDefaultModel` service).
+ * @returns the selection ref; `current` stays undefined when the service is
+ *   absent (the main session then runs on agent defaults).
+ */
+function createMainSelection(ctx: Context): ModelSelectionRef {
+  const service = ctx.get('agentDefaultModel') as unknown as AgentDefaultModelService | undefined
+  return {
+    current: service?.currentSelection(),
+    assembled: undefined,
+  }
+}
+
+/**
+ * Best-effort join of the deployment's default agent preset in the main
+ * agent's setup. The web host composes every agent through
+ * `AgentPresets.mount()`; without it the main session's tools, prompt
+ * sections, and skill catalog resolve against the empty global layer (the
+ * `agent-presets` warning). Never rejects: the main session keeps its own
+ * tools and persona even when the roster is absent or the mount fails.
+ * @param hostCtx - host context (for the optional `agentPresets` service).
+ * @param agentCtx - the main agent's scoped setup context.
+ */
+async function joinDefaultAgentPreset(hostCtx: Context, agentCtx: Context): Promise<void> {
+  const presets = hostCtx.get('agentPresets') as unknown as AgentPresetsService | undefined
+  if (presets === undefined) return
+  try {
+    const preset = await presets.resolve()
+    await presets.mount(agentCtx, preset.id)
+  } catch (err) {
+    console.warn(`${LOG_TAG} main session default agent preset join failed (running on the global layer):`, err)
+  }
+}
+
+/**
+ * Start one real turn on the main agent when its session has never run one.
+ *
+ * A session with no `turn/start` event is "blank". The workspace browser
+ * hides blank sessions (only the currently opened one shows), so a fresh
+ * main session would never appear under its workspace entry — it would look
+ * like the workspace is empty. Sending one initialization followup makes the
+ * driver start a turn, which persists `turn/start`; from then on the main
+ * session is a normal, always-visible session. Fire-and-forget: the turn
+ * runs in the background, and a model failure still leaves the session
+ * non-blank (the turn record lands with the driver start).
+ * @param hostCtx - host context (used only for diagnostics).
+ * @param agent - the freshly created/resumed main agent.
+ */
+function kickstartMainSessionIfBlank(hostCtx: Context, agent: Agent): void {
+  const events = agent.session?.events
+  if (events !== undefined && events.some(event => event.type === 'turn/start')) return
+  try {
+    agent.followup(createUserMessage({
+      content: [{ type: 'text', text: '（系统初始化）主会话已就绪，等待你的任务。' }],
+      source: { kind: 'plugin', plugin: MAIN_SESSION_PLUGIN },
+    }))
+    hostCtx.logger.info(`${LOG_TAG} kickstarted main session (blank → first turn)`)
+  } catch (err) {
+    hostCtx.logger.warn(`${LOG_TAG} main session kickstart failed: ${String(err)}`)
+  }
+}

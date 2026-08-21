@@ -1,10 +1,10 @@
 /**
- * tasks-view -- 会话页「任务」tab
+ * tasks-view -- 会话页「输入」tab
  *
- * Registers a third `conversation.view` tab (after 对话/轨迹): 任务.
+ * Registers a third `conversation.view` tab (after 对话/轨迹): 输入.
  * It records every user input message in the session — each user message
  * is listed newest-first with its timestamp and text, giving the user a
- * lightweight "task log" of what they asked in this session.
+ * lightweight "input log" of what they asked in this session.
  *
  * Data source: `api.sessions.history({ sessionId })` (the same RPC the
  * conversation surface pages with), filtering `user/message` events whose
@@ -17,8 +17,8 @@ import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import type {} from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '../contracts.ts'
 
-/** Stable view id for the tasks tab. */
-export const TASKS_VIEW_ID = 'tasks'
+/** Stable view id for the inputs tab. */
+export const TASKS_VIEW_ID = 'inputs'
 
 // ============================================================
 // Data types (loose projection of session.history)
@@ -62,7 +62,7 @@ export function applyTasksView(ctx: ClientContext): void {
     name: 'conversation.view',
     id: TASKS_VIEW_ID,
     order: 20,
-    label: () => '任务',
+    label: () => '输入',
     inject: (sessionId: string) => {
       const connection = ctx.get('connection') as { api?: { sessions?: SessionsApi } } | undefined
       if (connection?.api?.sessions === undefined) {
@@ -166,13 +166,13 @@ export function TasksView({ sessionId, history }: TasksViewProps): JSX.Element {
   return (
     <div className="tv-root">
       <div className="tv-header">
-        <span className="tv-title">任务记录</span>
+        <span className="tv-title">输入记录</span>
         <span className="tv-count">{tasks.length} 条</span>
       </div>
       {loading && <div className="tv-empty">加载中…</div>}
       {!loading && error !== null && <div className="tv-error">{error}</div>}
       {!loading && error === null && tasks.length === 0 && (
-        <div className="tv-empty">暂无任务记录</div>
+        <div className="tv-empty">暂无输入记录</div>
       )}
       {!loading && error === null && tasks.length > 0 && (
         <ul className="tv-list">

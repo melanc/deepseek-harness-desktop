@@ -82,6 +82,22 @@ export interface MainSessionDeps {
     workspaceId?: string
     error?: string
   }>
+  /** Record a delegation start in the session activity log (best-effort). */
+  recordActivityStart?(
+    sessionId: string,
+    task: string,
+    workspace?: { id: string; name: string },
+  ): void
+  /** Record a delegation's terminal state in the activity log (best-effort). */
+  recordActivityFinish?(
+    sessionId: string,
+    task: string,
+    status: 'completed' | 'failed' | 'timeout',
+    summary?: string,
+    workspace?: { id: string; name: string },
+  ): void
+  /** Resolve the newest delegated task text for a session (best-effort). */
+  taskTextOf?(sessionId: string): Promise<string | undefined>
 }
 
 export class MainSessionService {
@@ -191,6 +207,7 @@ export class MainSessionService {
         source: { kind: 'plugin', plugin: 'main-session' },
       })
       agent.followup(userMessage)
+      this.deps.recordActivityStart?.(sessionId, message, this.deps.workspaceOf(sessionId))
       return { success: true }
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : String(err) }
@@ -224,6 +241,15 @@ export class MainSessionService {
       if (created.error !== undefined) {
         return { success: false, error: created.error }
       }
+      if (options.task !== undefined && options.task.trim() !== '') {
+        this.deps.recordActivityStart?.(
+          created.sessionId,
+          options.task,
+          created.workspaceId === undefined
+            ? undefined
+            : { id: created.workspaceId, name: this.deps.workspaceOf(created.sessionId)?.name ?? created.workspaceId },
+        )
+      }
       return {
         success: true,
         sessionId: created.sessionId,
@@ -256,19 +282,23 @@ export class MainSessionService {
     const timeoutMs = options.timeoutMs ?? DEFAULT_REPLY_TIMEOUT_MS
     const maxChars = options.maxReplyChars ?? DEFAULT_REPLY_SUMMARY_CHARS
     const ws = this.deps.workspaceOf(sessionId)
+    const taskText = await this.deps.taskTextOf?.(sessionId)
     const startedAt = Date.now()
 
     while (true) {
       const text = this.readNewestAssistantText(agent, afterSeq)
       if (text !== null) {
-        return {
+        const result = {
           sessionId,
           summary: summarize(text, maxChars),
           ...ws === undefined ? {} : { workspaceId: ws.id, workspaceName: ws.name },
           timedOut: false,
         }
+        this.deps.recordActivityFinish?.(sessionId, taskText ?? '委派任务', 'completed', result.summary, ws)
+        return result
       }
       if (Date.now() - startedAt > timeoutMs) {
+        this.deps.recordActivityFinish?.(sessionId, taskText ?? '委派任务', 'timeout', undefined, ws)
         return { sessionId, timedOut: true }
       }
       await sleep(REPLY_POLL_INTERVAL_MS)
