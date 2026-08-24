@@ -458,8 +458,13 @@ export function apply(ctx: Context): void {
           sessionId: sessionIdOf(newSessionId),
           meta: { cwd: workspacePath },
           agentOptions,
-          setup: (agentCtx: Context) => {
+          setup: async (agentCtx: Context) => {
             installModelSelection(agentCtx, selection)
+            // Join the deployment default preset so the workspace session
+            // gets the standard tool set (bash/read/glob/grep/edit/write/…).
+            // Without this the session only sees the global layer, which in a
+            // Web profile contains just the host-registered agent_teams_* tools.
+            await joinDefaultAgentPreset(ctx, agentCtx)
           },
         })
         // 3. Attach to the workspace (validates header cwd against the path).
