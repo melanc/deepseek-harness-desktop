@@ -1,13 +1,14 @@
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import type {} from '@deepseek-ai/cordis-plugin-loader'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
-// Type convergence only: locale/theme declarations expose settings slot rows.
-// The desktop client does not load or register a settings surface.
+// Type-only service and SlotMap convergence for the Desktop settings section.
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-ui-theme/client'
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import { applyAdvancedShell } from './advanced-shell.ts'
 import { applyArchiveConfirm } from './archive-confirm/index.ts'
 import { startRendererBootReporter } from './boot-health.ts'
+import { applyDesktopSettings } from './desktop-settings.ts'
 import { installDesktopDirectoryPickerBridge, requestDesktopDirectoryValidation } from './directory-picker.ts'
 import { parseDesktopClientEnvironment } from './environment.ts'
 import { applyMessageChannelsSection } from './message-channels/index.tsx'
@@ -17,6 +18,34 @@ import { installWorkspaceFolderDrop } from './workspace-folder-drop.ts'
 
 export { applyAdvancedShell } from './advanced-shell.ts'
 export { applyArchiveConfirm, ARCHIVE_CONFIRM_OVERLAY_ID } from './archive-confirm/index.ts'
+export { applyDesktopSettings } from './desktop-settings.ts'
+export {
+  createDesktopSettingsApi,
+  desktopSettingsPaths,
+  parseDesktopActionAcceptance,
+  parseDesktopRestartAcceptance,
+  parseDesktopSettingsView,
+} from './desktop-settings-api.ts'
+export type {
+  DesktopMarketProvider,
+  DesktopMarketView,
+  DesktopProfileView,
+  DesktopRestartAcceptance,
+  DesktopSettingsApi,
+  DesktopSettingsView,
+} from './desktop-settings-api.ts'
+export { DesktopSettingsSection } from './DesktopSettingsSection.tsx'
+export { DesktopTerminalSettingsAction } from './DesktopTerminalSettingsAction.tsx'
+export type {
+  DesktopTerminalSettingsActionInjected,
+  DesktopTerminalSettingsActionProps,
+} from './DesktopTerminalSettingsAction.tsx'
+export type {
+  DesktopNotificationSettings,
+  DesktopSettingsSectionInjected,
+  DesktopSettingsSectionProps,
+  DesktopShellSettings,
+} from './DesktopSettingsSection.tsx'
 export {
   RENDERER_BOOT_REPORT_PATH,
   rendererBootReport,
@@ -29,18 +58,24 @@ export type { DesktopClientEnvironment, DesktopClientMode, DesktopClientPlatform
 export { applyMessageChannelsSection } from './message-channels/index.tsx'
 export { applyTasksView, TASKS_VIEW_ID } from './tasks-view/index.tsx'
 
-/** Services required by advanced presentation. */
+/** Services required by Desktop settings and advanced presentation. */
 export const inject = [
   'slots',
+  'locale',
+  'connection',
+  'remote',
+  'settingsScope',
   'sessions',
   'theme',
   'workspaces',
+  'uiRenderer',
 ]
 
 /** Register desktop-owned client surfaces for the current BrowserWindow mode. @param ctx - browser Cordis context. */
 export function apply(ctx: ClientContext): void {
   const environment = parseDesktopClientEnvironment(window.location.search)
   if (!environment) return
+  applyDesktopSettings(ctx, environment)
   ctx.effect(
     () => startRendererBootReporter(ctx.loader),
     'dsh-plugin-desktop: renderer boot health report',
