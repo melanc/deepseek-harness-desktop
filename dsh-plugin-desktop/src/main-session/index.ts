@@ -26,7 +26,7 @@ import type { Agent, AgentHandle } from '@deepseek-ai/dsh-agent'
 import { installModelSelection, type ModelSelection, type ModelSelectionRef } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
-import { MAIN_SESSION_ID, MAIN_SESSION_CWD_NAME, MAIN_SESSION_PLUGIN, USER_FACTS_FILE, PROCEDURES_FILE, SESSION_ACTIVITY_FILE, LOG_TAG } from './types.ts'
+import { MAIN_SESSION_ID, MAIN_SESSION_CWD_NAME, MAIN_SESSION_PLUGIN, USER_FACTS_FILE, PROCEDURES_FILE, SESSION_ACTIVITY_FILE, TASK_PROGRESS_FILE, LOG_TAG } from './types.ts'
 import { UserMemoryStore } from './memory.ts'
 import { registerUserMemorySection } from './memory-persona.ts'
 import { registerMemoryTools } from './memory-tools.ts'
@@ -35,6 +35,9 @@ import { registerProcedureSection } from './procedure-persona.ts'
 import { registerProcedureTools } from './procedure-tools.ts'
 import { SessionActivityStore } from './activity.ts'
 import { registerActivityTools } from './activity-tools.ts'
+import { TaskProgressStore } from './task-progress.ts'
+import { registerTaskProgressSection } from './task-progress-persona.ts'
+import { registerTaskProgressTools } from './task-progress-tools.ts'
 import { MainSessionService, sessionIdOf } from './service.ts'
 import { registerMainSessionTools } from './tools.ts'
 import { registerMainSessionPersona } from './persona.ts'
@@ -204,6 +207,12 @@ export function apply(ctx: Context): void {
     filePath: dshHomePath(MAIN_SESSION_CWD_NAME, 'memory', SESSION_ACTIVITY_FILE),
   })
 
+  // Task progress store: per-user-task dispatch tracker (subtask lifecycle +
+  // pending confirmations), same directory.
+  const taskProgressStore = new TaskProgressStore({
+    filePath: dshHomePath(MAIN_SESSION_CWD_NAME, 'memory', TASK_PROGRESS_FILE),
+  })
+
   // ── Main agent lifecycle (lazy) ─────────────────────────────────────────
   let handle: AgentHandle | undefined
   let ensuring: Promise<AgentHandle> | undefined
@@ -248,6 +257,8 @@ export function apply(ctx: Context): void {
             registerProcedureSection(agentCtx, procedureStore)
             registerProcedureTools(agentCtx, procedureStore)
             registerActivityTools(agentCtx, activityStore)
+            registerTaskProgressSection(agentCtx, taskProgressStore)
+            registerTaskProgressTools(agentCtx, taskProgressStore)
             registerMainSessionPersona(agentCtx)
             installModelSelection(agentCtx, selection)
             const toolsRuntime = agentCtx.get('tools') as

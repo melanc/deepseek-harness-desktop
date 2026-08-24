@@ -148,9 +148,13 @@ agent.followup(userMessage)   // 唤醒驱动器，作为 next-turn 输入
 | `workspace_list_sessions` | — | `{ sessions, ungrouped, complete }` |
 | `workspace_send_message` | `sessionId`, `message` | `{ success, error? }` |
 | `workspace_create_session` | `workspacePath?`, `workspaceTitle?`, `task?` | `{ success, sessionId?, workspaceId?, error? }` |
-| `workspace_await_reply` | `sessionId`, `timeoutMs?`, `maxReplyChars?` | `{ sessionId, summary?, workspaceId?, workspaceName?, timedOut, error? }` |
+| `workspace_await_reply` | `sessionId`, `timeoutMs?`, `maxReplyChars?` | `{ sessionId, summary?, workspaceId?, workspaceName?, timedOut, awaitingApproval?, error? }` |
+| `task_progress_update` | `taskId`, `description`, `subtasks`, `pendingConfirmations?` | `{ success, task?, error? }` |
+| `task_progress_query` | `taskId?`, `limit?` | `{ tasks, complete, error? }` |
 
 > `workspace_create_session` 的 `workspacePath` 可省略：省略时自动在 DSH 默认工作区根目录 `~/.dsh/workspaces/<workspaceTitle>/` 创建文件夹，工作区会话执行产物都放在该目录下。
+
+> `workspace_await_reply` 超时返回 `timedOut: true`；当超时是因为目标会话卡在**待用户批准**（最新 `approval/asked` 未决定）时，额外带 `awaitingApproval`（被申请权限的 tool 名），主会话据此汇报"会话 X 正在等你批准某操作"。
 
 工具通过 `defineTool` 定义，`execute` 返回纯 JSON 值，`render` 转为文本块。注册在 `agent.ctx`（setup 闭包内），因此**只对主会话模型可见**——工作区会话看不到也不受其影响。
 
@@ -163,7 +167,20 @@ agent.followup(userMessage)   // 唤醒驱动器，作为 next-turn 输入
 - **绝不回显工作区会话的实时执行细节/完整输出**；
 - 需要完整结果时引导用户到对应工作区会话查看（附 workspaceName/sessionId）。
 
+工作方式（7 步）：任务规划（拆子任务 + `task_progress_update` 建记录）→ 匹配会话（`workspace_list_sessions` + `session_activity`）→ 派发并跟踪（每派发一个标记 assigned）→ 等待结果（并行派发后统一收集）→ 管理待确认项（产出需拍板时记 pendingConfirmation）→ 简洁汇报（列出待确认项等用户答复）→ 不展示细节。
+
 该段通过 `agent.ctx` 注册，只出现在主会话的 prompt assembly 中。
+
+### 5.2 任务进度（task-progress.ts + 工具 + prompt 段）
+
+- **存储**：`~/.dsh/main-session/memory/task-progress.jsonl`（append-only JSONL，每 taskId 最新快照胜出）。记录任务的子任务状态机（`pending → assigned → running → completed / blocked / cancelled`）和待确认项。
+- **工具**：`task_progress_update`（全量替换快照）、`task_progress_query`（按 taskId 或全量查询，最新优先）。
+- **prompt 段**：`main-session:task-progress`（order 54），每次装配自动渲染最近任务概览（子任务状态 + 未解决待确认项），1s 缓存 + 写后失效——主会话无需工具调用即可接续上一轮未完成的任务。
+- **与活动日志的分工**：`session-activity` 按**目标会话**记委派台账（用于匹配会话）；`task-progress` 按**用户任务**记整轮进度（用于汇报进度与待确认项）。两者都存 `memory/` 下。
+
+### 5.3 权限申请（沿用 DSH 全局 approval）
+
+子任务执行中的权限申请（写文件/提权等）**不经过主会话中转**——工作区会话通过 DSH 全局 approval 机制发起，GUI 以 frame-wide 弹窗呈现，用户批准后工作区会话继续。主会话只在 `workspace_await_reply` 超时时感知（`awaitingApproval`）并在汇报里提示用户。这与"事后待确认项"（子任务产出需拍板）职责分开：前者实时授权，后者记入 `task_progress` 待确认项。
 
 ---
 

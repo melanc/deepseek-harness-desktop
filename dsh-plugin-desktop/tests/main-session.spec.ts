@@ -174,6 +174,48 @@ describe('MainSessionService', () => {
     expect(result.summary).toBeUndefined()
   })
 
+  it('awaitReply reports awaitingApproval when the session has an unanswered approval ask', async () => {
+    const agent = fakeAgent('ws-1', [
+      { type: 'approval/asked', data: { id: 'a1', toolName: 'bash' } },
+    ], [])
+    const service = new MainSessionService(deps({
+      getAgent: (id) => id === 'ws-1' ? agent : undefined,
+    }))
+
+    const result = await service.awaitReply('ws-1', { afterSeq: 0, timeoutMs: 50 })
+    expect(result.timedOut).toBe(true)
+    expect(result.awaitingApproval).toBe('bash')
+  })
+
+  it('awaitReply omits awaitingApproval when every approval ask is decided', async () => {
+    const agent = fakeAgent('ws-1', [
+      { type: 'approval/asked', data: { id: 'a1', toolName: 'bash' } },
+      { type: 'approval/decided', data: { id: 'a1' } },
+    ], [])
+    const service = new MainSessionService(deps({
+      getAgent: (id) => id === 'ws-1' ? agent : undefined,
+    }))
+
+    const result = await service.awaitReply('ws-1', { afterSeq: 0, timeoutMs: 50 })
+    expect(result.timedOut).toBe(true)
+    expect(result.awaitingApproval).toBeUndefined()
+  })
+
+  it('awaitReply reports the newest unanswered ask when several asks interleave', async () => {
+    const agent = fakeAgent('ws-1', [
+      { type: 'approval/asked', data: { id: 'a1', toolName: 'bash' } },
+      { type: 'approval/decided', data: { id: 'a1' } },
+      { type: 'approval/asked', data: { id: 'a2', toolName: 'write' } },
+    ], [])
+    const service = new MainSessionService(deps({
+      getAgent: (id) => id === 'ws-1' ? agent : undefined,
+    }))
+
+    const result = await service.awaitReply('ws-1', { afterSeq: 0, timeoutMs: 50 })
+    expect(result.timedOut).toBe(true)
+    expect(result.awaitingApproval).toBe('write')
+  })
+
   it('awaitReply reports an error for a missing live agent', async () => {
     const service = new MainSessionService(deps({ getAgent: () => undefined }))
     const result = await service.awaitReply('missing')

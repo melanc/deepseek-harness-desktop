@@ -189,6 +189,13 @@ export interface AwaitReplyResult {
   readonly workspaceName?: string
   /** True when the wait timed out without a new assistant message. */
   readonly timedOut: boolean
+  /**
+   * When the wait timed out because the target session is waiting on a
+   * pending approval (its last `approval/asked` is still undecided), this
+   * names the tool the session is asking permission to run. Absent when the
+   * timeout has no such cause.
+   */
+  readonly awaitingApproval?: string
   readonly error?: string
 }
 
@@ -261,6 +268,79 @@ export const SESSION_ACTIVITY_FILE = 'session-activity.jsonl'
 
 /** Default limit for {@link SessionActivityResult.activities}. */
 export const DEFAULT_ACTIVITY_LIMIT = 20
+
+// ============================================================
+// Task progress (per-task dispatch tracker)
+// ============================================================
+
+/** Lifecycle status of one subtask within a tracked task. */
+export type SubtaskStatus = 'pending' | 'assigned' | 'running' | 'completed' | 'blocked' | 'cancelled'
+
+/** One subtask row inside a {@link TaskProgress} record. */
+export interface SubtaskProgress {
+  /** Stable subtask id within the task (e.g. `s1`, or a short slug). */
+  readonly id: string
+  /** Short human-readable subtask title. */
+  readonly title: string
+  /** Current lifecycle status. */
+  readonly status: SubtaskStatus
+  /** Workspace session id the subtask was assigned to, once assigned. */
+  readonly sessionId?: string
+  /** Workspace display title the session belongs to, when attached. */
+  readonly workspaceName?: string
+  /** Result summary, filled when the subtask completes. */
+  readonly summary?: string
+}
+
+/** One pending user confirmation inside a {@link TaskProgress} record. */
+export interface PendingConfirmation {
+  /** Stable confirmation id within the task. */
+  readonly id: string
+  /** The question put to the user. */
+  readonly question: string
+  /** Related subtask id, when the confirmation concerns one. */
+  readonly subtaskId?: string
+  /** Resolution state. */
+  readonly status: 'open' | 'resolved'
+  /** The user's answer, when resolved. */
+  readonly resolution?: string
+}
+
+/** One durable task-progress record in the task-progress JSONL log. */
+export interface TaskProgress {
+  /** Stable task id (e.g. epoch-ms + short slug). */
+  readonly taskId: string
+  /** The user's original task description. */
+  readonly description: string
+  /** Epoch ms when the task was first tracked. */
+  readonly createdAt: number
+  /** Epoch ms of the last update. */
+  readonly updatedAt: number
+  /** Ordered subtask list. */
+  readonly subtasks: readonly SubtaskProgress[]
+  /** Pending user confirmations (open ones are reported to the user). */
+  readonly pendingConfirmations: readonly PendingConfirmation[]
+}
+
+/** Result of updating (creating or mutating) a task-progress record. */
+export interface TaskProgressUpdateResult {
+  readonly success: boolean
+  readonly task?: TaskProgress
+  readonly error?: string
+}
+
+/** Result of querying task-progress records. */
+export interface TaskProgressQueryResult {
+  readonly tasks: TaskProgress[]
+  readonly complete: boolean
+  readonly error?: string
+}
+
+/** Task-progress log file name under the main session cwd's `memory/` dir. */
+export const TASK_PROGRESS_FILE = 'task-progress.jsonl'
+
+/** Default limit for {@link TaskProgressQueryResult.tasks}. */
+export const DEFAULT_TASK_PROGRESS_LIMIT = 10
 
 // ============================================================
 // Constants
