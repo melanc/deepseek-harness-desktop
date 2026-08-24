@@ -22,6 +22,8 @@
       name: dsh-plugin-desktop/message-channels
     - id: main-session
       name: dsh-plugin-desktop/main-session
+    - id: tal-gateway
+      name: dsh-plugin-desktop/tal-gateway
 
 # A desktop launch has no terminal operator waiting for the Web readiness line.
 - id: web-runtime

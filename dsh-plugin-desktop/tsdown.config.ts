@@ -32,6 +32,7 @@ export default defineConfig([
       'windows-acl-runner': 'src/windows-acl-runner.ts',
       'message-channels': 'src/message-channels/index.ts',
       'main-session': 'src/main-session/index.ts',
+      'tal-gateway': 'src/tal-gateway/index.ts',
       main: 'src/main.ts',
     },
     outDir: 'lib',
