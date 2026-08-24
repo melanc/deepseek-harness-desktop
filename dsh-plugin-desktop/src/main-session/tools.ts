@@ -179,12 +179,13 @@ export function registerMainSessionTools(
             workspaceId: { type: 'string' },
             workspaceName: { type: 'string' },
             timedOut: { type: 'boolean', required: true },
+            awaitingApproval: { type: 'string' },
             error: { type: 'string' },
           },
         },
         render: (
           _args: { sessionId: string; timeoutMs?: number; maxReplyChars?: number },
-          value: { sessionId: string; summary?: string; workspaceId?: string; workspaceName?: string; timedOut: boolean; error?: string },
+          value: { sessionId: string; summary?: string; workspaceId?: string; workspaceName?: string; timedOut: boolean; awaitingApproval?: string; error?: string },
         ) => {
           return [{
             type: 'text',

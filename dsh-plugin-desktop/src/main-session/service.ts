@@ -299,10 +299,52 @@ export class MainSessionService {
       }
       if (Date.now() - startedAt > timeoutMs) {
         this.deps.recordActivityFinish?.(sessionId, taskText ?? '委派任务', 'timeout', undefined, ws)
-        return { sessionId, timedOut: true }
+        const awaitingApproval = this.readPendingApprovalTool(agent)
+        return {
+          sessionId,
+          timedOut: true,
+          ...awaitingApproval === undefined ? {} : { awaitingApproval },
+        }
       }
       await sleep(REPLY_POLL_INTERVAL_MS)
     }
+  }
+
+  /**
+   * Detect whether a session is stuck waiting on a user approval: some
+   * `approval/asked` event has no matching `approval/decided` with the same
+   * id. Returns the tool name of the newest unanswered ask, or undefined when
+   * the session is not awaiting approval.
+   *
+   * The `approval/*` event types are declared by the upstream user-approval
+   * package via declaration merging; this plugin does not depend on that
+   * package, so the events are read with a structural view instead.
+   */
+  private readPendingApprovalTool(agent: Agent): string | undefined {
+    interface ApprovalEventView {
+      readonly type: string
+      readonly data?: { id?: string; toolName?: string }
+    }
+    const events = agent.session.events as readonly ApprovalEventView[]
+    const decided = new Set<string>()
+    // Walk tail-first; the newest unanswered ask is the one the session is
+    // blocked on. asked/decided carry the same approval id, so pair by id.
+    for (let i = events.length - 1; i >= 0; i -= 1) {
+      const event = events[i]
+      if (event === undefined) continue
+      if (event.type === 'approval/decided') {
+        const id = event.data?.id
+        if (id !== undefined) decided.add(id)
+        continue
+      }
+      if (event.type === 'approval/asked') {
+        const id = event.data?.id
+        if (id === undefined || !decided.has(id)) {
+          return event.data?.toolName
+        }
+      }
+    }
+    return undefined
   }
 
   /** Read the newest assistant text block appended after `afterSeq`, if any. */
