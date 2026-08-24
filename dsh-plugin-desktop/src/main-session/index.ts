@@ -444,12 +444,21 @@ export function apply(ctx: Context): void {
       // 2. Create the workspace session agent rooted at the workspace path.
       const newSessionId = options.sessionId ?? `ws-session-${randomUUID()}`
       try {
+        // Inject the deployment default model selection exactly like the main
+        // agent does: `agentOptions` feeds `{{model}}`/`{{provider}}` prompt
+        // variables (`agent.options.model`), and `installModelSelection` binds
+        // the same selection into prompt assembly and request routing. Without
+        // both, a workspace session created here fails prompt assembly with
+        // `prompt variable "{{model}}" has no value`.
+        const selection = createMainSelection(ctx)
+        const selected = selection.current
+        const agentOptions = selected === undefined ? {} : { ...selected }
         const created = await agents.create({
           sessionId: sessionIdOf(newSessionId),
           meta: { cwd: workspacePath },
-          agentOptions: {},
-          setup: () => {
-            // Workspace sessions are ordinary agents; no special tools.
+          agentOptions,
+          setup: (agentCtx: Context) => {
+            installModelSelection(agentCtx, selection)
           },
         })
         // 3. Attach to the workspace (validates header cwd against the path).
