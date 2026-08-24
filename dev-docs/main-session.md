@@ -54,9 +54,10 @@ dsh-plugin-desktop/tests/
 
 **简洁汇报（交互定位）**：
 - 主会话**不回显工作区会话的实时执行细节**；
-- 只汇报**执行进度 + 结果摘要**（一两句话）；
+- 派发任务后**本轮立即静默结束**，不主动轮询/追问；
+- 工作区会话完成时，由**完成回调**（监听 `turn/end` 事件）把结果摘要主动注入主会话，主会话据此一次性汇报**进度 + 结果摘要**（一两句话）；
 - 完整结果留在工作区会话，主会话把用户引导过去查看（附 workspaceName/sessionId）；
-- 通过主会话专属 persona（`persona.ts` 注册的 system prompt 段）强制这一行为。
+- 通过主会话专属 persona（`persona.ts` 注册的 system prompt 段）+ 完成回调（`completion-callback.ts`）共同强制这一行为。
 
 **设计要点**：
 - 主会话 = root agent，固定 id `main-session`，**惰性创建**（首次使用时 `ctx.agents.create()`，之后重启通过 `ctx.agents.resume()` 从持久化恢复，历史延续）；

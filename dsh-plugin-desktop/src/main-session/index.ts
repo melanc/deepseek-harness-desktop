@@ -43,6 +43,7 @@ import { MainSessionService, sessionIdOf } from './service.ts'
 import { registerMainSessionTools } from './tools.ts'
 import { registerMainSessionPersona } from './persona.ts'
 import { resolveDefaultWorkspacePath } from './workspace-path.ts'
+import { handleSessionEvent, buildNotificationMessage, type TurnEndEvent, type CompletionSessionView } from './completion-callback.ts'
 
 /** Stable Cordis plugin name. */
 export const name = 'main-session'
@@ -483,6 +484,62 @@ export function apply(ctx: Context): void {
       }
     },
   })
+
+  // ── Workspace completion callback ────────────────────────────────────────
+  // The "push" half of the dispatch flow: when a workspace session's turn
+  // actually ends, react once — record the terminal ledger row and inject a
+  // one-line summary into the main session, which reports it and says nothing
+  // else. This replaces the polling `workspace_await_reply` loop, so the
+  // main session no longer wakes mid-execution to ask "are you done yet?".
+  ctx.effect(() => {
+    const stop = ctx.on('session/event', (session, event) => {
+      const sessionId = String(session.header.id)
+      if (sessionId === '') return
+      void handleSessionEvent(
+        event as TurnEndEvent,
+        sessionId,
+        session as CompletionSessionView,
+        {
+          isMainSession: (id) => id === MAIN_SESSION_ID,
+          latestRunningTask: (id) => activityStore.latestRunningTask(id),
+          workspaceOf: (id) => {
+            const workspaceRegistry = resolveWorkspaceRegistry()
+            if (workspaceRegistry === undefined) return undefined
+            try {
+              for (const ws of workspaceRegistry.list()) {
+                if (ws.sessionIds.includes(sessionIdOf(id))) {
+                  return { id: ws.id, name: ws.title }
+                }
+              }
+            } catch { /* best effort */ }
+            return undefined
+          },
+          recordFinish: (id, task, status, summary, workspace) => {
+            void activityStore.recordFinish(id, task, status, summary, workspace)
+          },
+          notifyMainSession: (message) => {
+            try {
+              const mainAgent = agents.get(sessionIdOf(MAIN_SESSION_ID))
+              if (mainAgent === undefined) {
+                ctx.logger.warn(`${LOG_TAG} completion callback: main agent not live, dropping notification`)
+                return
+              }
+              mainAgent.followup(buildNotificationMessage(message))
+            } catch (err) {
+              ctx.logger.warn(`${LOG_TAG} completion callback followup failed:`, err)
+            }
+          },
+        },
+      ).then((report) => {
+        if (report !== null) {
+          ctx.logger.info(`${LOG_TAG} completion callback reported ${report.sessionId}: ${report.status}`)
+        }
+      }).catch((err) => {
+        ctx.logger.warn(`${LOG_TAG} completion callback failed:`, err)
+      })
+    })
+    return stop
+  }, 'main-session: workspace completion callback')
 
   // ── Lifecycle ───────────────────────────────────────────────────────────
   ctx.effect(() => {

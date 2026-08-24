@@ -289,10 +289,16 @@ export class MainSessionService {
   }
 
   /**
-   * Wait for a target session's next assistant reply after a message was
-   * injected. Records the surface seq before waiting, then polls the target
-   * agent's derived messages until a new assistant message appears or the
-   * timeout elapses.
+   * Wait for a target session's turn to *finish* (a `turn/end` event after
+   * `afterSeq`), then return the final assistant text as a summary.
+   *
+   * Unlike the old behavior (return on the first intermediate
+   * `assistant/message`), this settles once the workspace session's turn has
+   * actually ended — so a single await yields the *complete* outcome rather
+   * than a half-finished answer that forces the main session to keep asking
+   * "are you done yet?". The completion callback (`completion-callback.ts`)
+   * is the primary path; this method remains as an explicit, opt-in wait for
+   * callers that want a synchronous result.
    */
   async awaitReply(
     sessionId: string,
@@ -311,15 +317,25 @@ export class MainSessionService {
     const startedAt = Date.now()
 
     while (true) {
-      const text = this.readNewestAssistantText(agent, afterSeq)
-      if (text !== null) {
+      const turnEnd = this.readTurnEndAfter(agent, afterSeq)
+      if (turnEnd !== null) {
+        // The turn has settled: read its final assistant text (if any) and
+        // report it as the completed outcome.
+        const text = this.readNewestAssistantText(agent, afterSeq)
+        const summary = text === null ? undefined : summarize(text, maxChars)
         const result = {
           sessionId,
-          summary: summarize(text, maxChars),
+          ...summary === undefined ? {} : { summary },
           ...ws === undefined ? {} : { workspaceId: ws.id, workspaceName: ws.name },
           timedOut: false,
         }
-        this.deps.recordActivityFinish?.(sessionId, taskText ?? '委派任务', 'completed', result.summary, ws)
+        this.deps.recordActivityFinish?.(
+          sessionId,
+          taskText ?? '委派任务',
+          summary === undefined ? 'failed' : 'completed',
+          summary,
+          ws,
+        )
         return result
       }
       if (Date.now() - startedAt > timeoutMs) {
@@ -333,6 +349,15 @@ export class MainSessionService {
       }
       await sleep(REPLY_POLL_INTERVAL_MS)
     }
+  }
+
+  /** Read the newest `turn/end` event appended after `afterSeq`, if any. */
+  private readTurnEndAfter(agent: Agent, afterSeq: number): { type: string; seq: number } | null {
+    const event = agent.session.events.findLast(
+      (e) => e.type === 'turn/end' && e.seq > afterSeq,
+    )
+    if (event === undefined) return null
+    return { type: event.type, seq: event.seq }
   }
 
   /**

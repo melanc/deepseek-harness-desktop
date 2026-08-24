@@ -37,12 +37,12 @@
               │  主会话专属工具（agent.ctx scope）
               ├── workspace_list_sessions   → ctx.workspaceRegistry + ctx.sessionQuery + ctx.agents
               ├── workspace_send_message    → agent.followup(createUserMessage(...))
-              └── workspace_await_reply     → 轮询 session.deriveMessages()
+              └── workspace_await_reply     → 轮询 session.deriveMessages()（降级可选）
               │
               ▼
         工作区会话 A / B / C（普通 root agent，各自 workspace）
               ▲           │
-              └───────────┘  assistant 回复 → await_reply 收集
+              └───────────┘  turn/end（完成事件）→ 完成回调 → 摘要注入主会话
 ```
 
 **关键设计**：
@@ -55,6 +55,7 @@
 | 工具作用域 | 四个编排工具注册在**主 agent 的 scope**（`agent.ctx`），只有主会话能看到它们 |
 | 消息注入 | `createUserMessage` + `agent.followup()`（与 message-channels 相同的注入路径，source 标记 `main-session`） |
 | 回复收集 | 记录注入前 `session.seq`，轮询 `deriveMessages()` 找 seq 之后的最新 assistant 文本（500ms 间隔，默认 5min 超时） |
+| **完成回调（新增）** | 订阅全局 `session/event`，监听工作区会话的 `turn/end`；命中派发台账（session-activity 里 `running` 行）时读摘要、记终端行、把一句话结果注入主会话唤醒其汇报。**取代派发后的主动轮询**——主会话派发完即静默，结果被动送达 |
 
 ---
 
@@ -67,11 +68,13 @@ src/main-session/
   tools.ts            四个编排工具（defineTool），注册到主 agent scope
   persona.ts          主会话 persona（简洁调度者 system prompt 段）
   workspace-path.ts   默认工作区根目录（~/.dsh/workspaces/）+ slugify + 目录创建
+  completion-callback.ts  工作区完成回调：监听 turn/end、匹配派发台账、摘要注入主会话（纯协调逻辑，deps 注入）
   index.ts            Host 插件：ctx.get 解析依赖 + 惰性 agent 创建 + ctx.mainSession service
 
 tests/
-  main-session.spec.ts                   12 个单元测试
+  main-session.spec.ts                   17 个单元测试
   main-session-workspace-path.spec.ts    4 个测试（slugify / 默认根目录）
+  main-session-completion-callback.spec.ts  11 个测试（turn/end 匹配 / 摘要 / 失败 / 通知渲染）
 ```
 
 ---
@@ -112,15 +115,17 @@ agent.followup(userMessage)   // 唤醒驱动器，作为 next-turn 输入
 
 目标无 live agent 时返回 `{ success: false, error }`。
 
-### 4.3 等待回复（awaitReply）— 摘要化
+### 4.3 等待回复（awaitReply）— 摘要化（turn/end 结算）
 
 1. 记录 `afterSeq = agent.session.seq`（注入前的位置，也可显式传）；
-2. 轮询：找 `assistant/message` 事件中 `seq > afterSeq` 的最新一个 → `deriveMessages()` 里取对应文本；
+2. 轮询：等 `turn/end` 事件（`seq > afterSeq`）出现，**确认工作区会话这一轮真正结束**后，再 `deriveMessages()` 取最终 assistant 文本——不再在第一条中间 `assistant/message` 时就返回；
 3. **摘要化**：回复截断到 `maxReplyChars`（默认 `DEFAULT_REPLY_SUMMARY_CHARS` = 800 字符），超长时追加「…（完整结果见工作区会话）」；
 4. 附带工作区跳转信息：`workspaceId` / `workspaceName`（从 workspace registry 解析）；
-5. 默认 5min 超时（可配 `timeoutMs`），超时返回 `{ timedOut: true }`。
+5. 默认 5min 超时（可配 `timeoutMs`），超时返回 `{ timedOut: true }`；turn 结束但无 assistant 文本（如 error/max-tokens 空回复）记为 failed。
 
-> **为什么摘要化**：主会话是简洁的调度台。它向用户汇报的是「谁在执行、进度如何、结果怎样」，不是完整转录。完整结果留在工作区会话，用户通过返回的 workspaceName/sessionId 跳转查看。
+> **为什么 turn/end 结算 + 摘要化**：主会话是简洁的调度台。它向用户汇报的是「谁在执行、进度如何、结果怎样」，不是完整转录。等 turn/end 而非第一条消息，保证一次 await 拿到的是**完整结果**，避免主会话因拿到半成品而反复追问。完整结果留在工作区会话，用户通过返回的 workspaceName/sessionId 跳转查看。
+
+> **注意**：`awaitReply` 是可选的显式等待能力；主会话的默认流程已改为**完成回调**（`completion-callback.ts`）被动收集结果，派发后不再主动调用它。
 
 ### 4.4 创建工作区会话（createWorkspaceSession）
 
@@ -162,12 +167,12 @@ agent.followup(userMessage)   // 唤醒驱动器，作为 next-turn 输入
 
 主会话额外注册一个 **agent 作用域的系统提示词段**（`main-session:persona`，order 50），定义简洁调度者行为：
 
-- 只发布任务、等待结果、简洁汇报；
+- 只发布任务、**派发后本轮即静默**、收到回调结果后简洁汇报；
 - 汇报只给「进度 + 结果摘要」（一两句话）；
-- **绝不回显工作区会话的实时执行细节/完整输出**；
+- **绝不回显工作区会话的实时执行细节/完整输出**，也**不主动轮询追问**（结果由完成回调被动送达）；
 - 需要完整结果时引导用户到对应工作区会话查看（附 workspaceName/sessionId）。
 
-工作方式（7 步）：任务规划（拆子任务 + `task_progress_update` 建记录）→ 匹配会话（`workspace_list_sessions` + `session_activity`）→ 派发并跟踪（每派发一个标记 assigned）→ 等待结果（并行派发后统一收集）→ 管理待确认项（产出需拍板时记 pendingConfirmation）→ 简洁汇报（列出待确认项等用户答复）→ 不展示细节。
+工作方式（7 步）：任务规划（拆子任务 + `task_progress_update` 建记录）→ 匹配会话（`workspace_list_sessions` + `session_activity`）→ 派发并跟踪（每派发一个标记 assigned）→ **派发完即静默结束本轮**（结果由完成回调送达）→ 管理待确认项（产出需拍板时记 pendingConfirmation）→ 收到回调后简洁汇报（列出待确认项等用户答复）→ 不展示细节。
 
 该段通过 `agent.ctx` 注册，只出现在主会话的 prompt assembly 中。
 
