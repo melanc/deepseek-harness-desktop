@@ -25,6 +25,7 @@ import { mkdir, realpath } from 'node:fs/promises'
 import type { Agent, AgentHandle } from '@deepseek-ai/dsh-agent'
 import { installModelSelection, type ModelSelection, type ModelSelectionRef } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { SessionTitleInvalidError } from '@deepseek-ai/dsh-session-title'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 import { MAIN_SESSION_ID, MAIN_SESSION_CWD_NAME, MAIN_SESSION_PLUGIN, USER_FACTS_FILE, PROCEDURES_FILE, SESSION_ACTIVITY_FILE, TASK_PROGRESS_FILE, LOG_TAG } from './types.ts'
 import { UserMemoryStore } from './memory.ts'
@@ -183,6 +184,11 @@ export function apply(ctx: Context): void {
   const agents = ctx.get('agents') as unknown as AgentsRegistry
   const sessions = ctx.get('sessions') as unknown as SessionsStore
   const sessionQuery = ctx.get('sessionQuery') as unknown as SessionQueryEngine | undefined
+  // The session-title service is resolved lazily (like the workspace registry):
+  // it may not be published when apply runs, and rename must observe the live
+  // service. Absent → rename reports `unavailable`.
+  const resolveSessionTitle = (): { rename(session: unknown, title: string): { title: string; eventSeq: number } } | undefined =>
+    ctx.get('sessionTitle') as unknown as { rename(session: unknown, title: string): { title: string; eventSeq: number } } | undefined
   // The workspace registry is resolved lazily inside ensureMainAgent (not
   // captured at apply time): the workspace service may not be published yet
   // when this plugin's apply runs, and attach must observe the latest state.
@@ -372,6 +378,25 @@ export function apply(ctx: Context): void {
         return snapshot?.title
       } catch {
         return undefined
+      }
+    },
+    renameSession: (id, title) => {
+      const titles = resolveSessionTitle()
+      if (titles === undefined) {
+        return { success: false, code: 'unavailable', error: 'session title service is not available' }
+      }
+      const agent = agents.get(sessionIdOf(id))
+      if (agent === undefined) {
+        return { success: false, code: 'no-live-agent', error: `Session ${id} has no live agent (is it open in a workspace?)` }
+      }
+      try {
+        const accepted = titles.rename(agent.session, title)
+        return { success: true, title: accepted.title, seq: accepted.eventSeq }
+      } catch (error: unknown) {
+        if (error instanceof SessionTitleInvalidError) {
+          return { success: false, code: 'title-invalid', error: error.message }
+        }
+        return { success: false, code: 'internal', error: error instanceof Error ? error.message : String(error) }
       }
     },
     lastActiveOf: (id) => sessions.get(sessionIdOf(id))?.header.createdAt,

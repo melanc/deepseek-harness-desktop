@@ -230,6 +230,22 @@ export interface CreateWorkspaceSessionResult {
 }
 
 // ============================================================
+// Session rename
+// ============================================================
+
+/** Result of renaming a workspace session. */
+export interface RenameSessionResult {
+  readonly success: boolean
+  /** The accepted (normalized) title, when the rename succeeded. */
+  readonly title?: string
+  /** Durable seq of the appended `session/title` event. */
+  readonly seq?: number
+  /** Stable machine code (`title-invalid` / `no-live-agent` / `unavailable`). */
+  readonly code?: string
+  readonly error?: string
+}
+
+// ============================================================
 // Session activity log (dispatch ledger)
 // ============================================================
 

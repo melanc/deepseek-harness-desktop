@@ -200,6 +200,41 @@ export function registerMainSessionTools(
         })
       },
     }),
+
+    defineTool({
+      name: 'workspace_rename_session',
+      description:
+        'Rename a workspace session\'s title. Use this when the user asks to rename a session. ' +
+        'Returns the accepted (normalized) title and the durable seq of the title event. ' +
+        'Fails with code "no-live-agent" when the target session is not open, and "title-invalid" ' +
+        'when the title normalizes to empty.',
+      parameters: {
+        sessionId: {
+          type: 'string',
+          required: true,
+          description: 'Target session id (from workspace_list_sessions).',
+        },
+        title: {
+          type: 'string',
+          required: true,
+          description: 'New title text (normalized by the host; empty-after-normalize is rejected).',
+        },
+      },
+      output: {
+        schema: {
+          type: 'json',
+        },
+        render: (_args: Record<string, unknown>, value: unknown) => {
+          return [{
+            type: 'text',
+            text: JSON.stringify(value, null, 2),
+          }]
+        },
+      },
+      async execute(args: { sessionId: string; title: string }) {
+        return JSON.parse(JSON.stringify(service.renameSession(args.sessionId, args.title))) as never
+      },
+    }),
   ]
 
   for (const tool of tools) {
