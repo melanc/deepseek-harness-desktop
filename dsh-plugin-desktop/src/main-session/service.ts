@@ -32,6 +32,7 @@ import {
   type SendMessageResult,
   type AwaitReplyResult,
   type CreateWorkspaceSessionResult,
+  type RenameSessionResult,
   type WorkspaceSessionView,
 } from './types.ts'
 
@@ -98,6 +99,12 @@ export interface MainSessionDeps {
   ): void
   /** Resolve the newest delegated task text for a session (best-effort). */
   taskTextOf?(sessionId: string): Promise<string | undefined>
+  /**
+   * Rename a workspace session's title through the host session-title
+   * service. The caller resolves the live agent and maps validation/liveness
+   * failures onto {@link RenameSessionResult}.
+   */
+  renameSession(sessionId: string, title: string): RenameSessionResult
 }
 
 export class MainSessionService {
@@ -261,6 +268,24 @@ export class MainSessionService {
         error: err instanceof Error ? err.message : String(err),
       }
     }
+  }
+
+  /**
+   * Rename a workspace session's title. The live agent must exist; the title
+   * is normalized by the host session-title service (empty-after-normalize is
+   * rejected as `title-invalid`). Returns the accepted title and its durable
+   * event seq so the main session can report the rename.
+   */
+  renameSession(sessionId: string, title: string): RenameSessionResult {
+    const agent = this.deps.getAgent(sessionId)
+    if (agent === undefined) {
+      return {
+        success: false,
+        code: 'no-live-agent',
+        error: `Session ${sessionId} has no live agent (is it open in a workspace?)`,
+      }
+    }
+    return this.deps.renameSession(sessionId, title)
   }
 
   /**

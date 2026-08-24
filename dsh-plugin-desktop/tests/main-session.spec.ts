@@ -43,6 +43,7 @@ function deps(overrides: Partial<MainSessionDeps> = {}): MainSessionDeps {
       sessionId: options.sessionId ?? 'ws-session-new',
       workspaceId: 'ws-1',
     }),
+    renameSession: () => ({ success: false, code: 'unavailable', error: 'no renameSession injected' }),
     ...overrides,
   }
 }
@@ -220,6 +221,28 @@ describe('MainSessionService', () => {
     const service = new MainSessionService(deps({ getAgent: () => undefined }))
     const result = await service.awaitReply('missing')
     expect(result.error).toContain('no live agent')
+  })
+
+  it('renameSession delegates to the injected rename and returns title + seq', () => {
+    const agent = fakeAgent('ws-1')
+    const renameSession = vi.fn(() => ({ success: true, title: '重构模块', seq: 42 }))
+    const service = new MainSessionService(deps({ getAgent: (id) => id === 'ws-1' ? agent : undefined, renameSession }))
+
+    const result = service.renameSession('ws-1', '  重构模块  ')
+    expect(result.success).toBe(true)
+    expect(result.title).toBe('重构模块')
+    expect(result.seq).toBe(42)
+    expect(renameSession).toHaveBeenCalledWith('ws-1', '  重构模块  ')
+  })
+
+  it('renameSession reports no-live-agent before delegating', () => {
+    const renameSession = vi.fn()
+    const service = new MainSessionService(deps({ getAgent: () => undefined, renameSession }))
+
+    const result = service.renameSession('missing', 'x')
+    expect(result.success).toBe(false)
+    expect(result.code).toBe('no-live-agent')
+    expect(renameSession).not.toHaveBeenCalled()
   })
 
   it('ensures the main agent once and reuses the handle', async () => {
