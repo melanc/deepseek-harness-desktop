@@ -80,7 +80,8 @@ interface SessionsStore {
 }
 
 interface WorkspaceRegistry {
-  list(): Array<{ id: string; title: string; sessionIds: unknown[] }>
+  list(): Array<{ id: string; title: string; path?: string; sessionIds: unknown[] }>
+  resolveByPath?(path: string): Promise<{ id: string; title: string; path?: string } | undefined>
   create(path: string, title?: string): Promise<WorkspaceEntity>
 }
 
@@ -431,6 +432,42 @@ export function apply(ctx: Context): void {
         }
       }
 
+      // 0.5 Guard against duplicate workspace creation. The host registry
+      // matches workspaces by exact canonical path; passing a sub-directory
+      // of an existing workspace (e.g. .../kt_repos/watcher when kt_repos
+      // already exists at .../kt_repos) would silently register a second
+      // workspace, and same-titled workspaces are easy to create by accident.
+      // When either is detected, refuse to create and report the existing
+      // workspace so the caller can reuse it.
+      if (options.workspacePath !== undefined) {
+        const exact = workspaceRegistry.resolveByPath === undefined
+          ? undefined
+          : await workspaceRegistry.resolveByPath(options.workspacePath)
+        if (exact !== undefined) {
+          return {
+            sessionId: '',
+            error: `workspace path "${options.workspacePath}" is already owned by existing workspace "${exact.title}" (${exact.id}); reuse it instead of creating a duplicate`,
+          }
+        }
+        const existing = workspaceRegistry.list()
+        const parent = existing.find(w => w.path !== undefined && isPathWithinOrEqual(options.workspacePath!, w.path!))
+        if (parent !== undefined) {
+          return {
+            sessionId: '',
+            error: `workspace path "${options.workspacePath}" is inside existing workspace "${parent.title}" (${parent.id}); reuse it instead of creating a sub-directory workspace`,
+          }
+        }
+      }
+      if (options.workspaceTitle !== undefined) {
+        const byTitle = workspaceRegistry.list().find(w => w.title === options.workspaceTitle)
+        if (byTitle !== undefined) {
+          return {
+            sessionId: '',
+            error: `a workspace titled "${options.workspaceTitle}" already exists (${byTitle.id}); pass its workspacePath to reuse it, or use a different title`,
+          }
+        }
+      }
+
       // 1. Ensure the workspace exists (idempotent).
       let ws: WorkspaceEntity
       try {
@@ -665,4 +702,18 @@ function kickstartMainSessionIfBlank(hostCtx: Context, agent: Agent): void {
   } catch (err) {
     hostCtx.logger.warn(`${LOG_TAG} main session kickstart failed: ${String(err)}`)
   }
+}
+
+/**
+ * Whether `candidate` equals `parent` or lives strictly inside it, using a
+ * path-segment-aware prefix comparison (so `/a/bc` is not treated as inside
+ * `/a/b`). Paths are normalized to forward slashes before comparing so both
+ * POSIX and Windows-style spellings behave predictably.
+ */
+function isPathWithinOrEqual(candidate: string, parent: string): boolean {
+  const norm = (p: string): string => p.replace(/\\/g, '/').replace(/\/+$/, '')
+  const c = norm(candidate)
+  const p = norm(parent)
+  if (c === p) return true
+  return c.startsWith(`${p}/`)
 }
