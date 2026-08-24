@@ -122,31 +122,65 @@ describe('MainSessionService', () => {
     expect(message.source).toMatchObject({ kind: 'plugin', plugin: 'main-session' })
   })
 
-  it('awaitReply returns the newest assistant text after the injection seq', async () => {
-    const assistantEvent = { type: 'assistant/message', seq: 10 }
+  it('awaitReply returns the final assistant text once the turn ends', async () => {
+    const events = [
+      { type: 'assistant/message', seq: 8 },
+      { type: 'turn/end', seq: 10, data: { reason: { kind: 'completed' } } },
+    ]
     const messages = [
       { role: 'user', content: [{ type: 'text', text: 'in' }] },
       { role: 'assistant', content: [{ type: 'text', text: 'done' }] },
     ]
-    const agent = fakeAgent('ws-1', [assistantEvent], messages)
+    const agent = fakeAgent('ws-1', events, messages)
     const service = new MainSessionService(deps({
       getAgent: (id) => id === 'ws-1' ? agent : undefined,
     }))
 
-    // afterSeq = 5 (before the assistant event at seq 10).
+    // afterSeq = 5 (before both the assistant message and turn/end).
     const result = await service.awaitReply('ws-1', { afterSeq: 5, timeoutMs: 2000 })
     expect(result.timedOut).toBe(false)
     expect(result.summary).toBe('done')
   })
 
+  it('awaitReply waits for turn/end, not the first intermediate assistant message', async () => {
+    const events = [
+      { type: 'assistant/message', seq: 8 },
+      { type: 'turn/end', seq: 10, data: { reason: { kind: 'completed' } } },
+    ]
+    const messages = [
+      { role: 'user', content: [{ type: 'text', text: 'in' }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'final result' }] },
+    ]
+    const agent = fakeAgent('ws-1', events, messages)
+    // With no turn/end visible yet, the wait must not settle on the
+    // intermediate assistant message: it settles only after turn/end lands.
+    const noTurnEnd = fakeAgent('ws-1', [{ type: 'assistant/message', seq: 8 }], messages)
+    const serviceNoEnd = new MainSessionService(deps({
+      getAgent: (id) => id === 'ws-1' ? noTurnEnd : undefined,
+    }))
+    const timeout = await serviceNoEnd.awaitReply('ws-1', { afterSeq: 5, timeoutMs: 50 })
+    expect(timeout.timedOut).toBe(true)
+    expect(timeout.summary).toBeUndefined()
+
+    const service = new MainSessionService(deps({
+      getAgent: (id) => id === 'ws-1' ? agent : undefined,
+    }))
+    const result = await service.awaitReply('ws-1', { afterSeq: 5, timeoutMs: 2000 })
+    expect(result.timedOut).toBe(false)
+    expect(result.summary).toBe('final result')
+  })
+
   it('awaitReply summarizes long replies and includes workspace info', async () => {
     const longText = 'x'.repeat(2000)
-    const assistantEvent = { type: 'assistant/message', seq: 10 }
+    const events = [
+      { type: 'assistant/message', seq: 8 },
+      { type: 'turn/end', seq: 10, data: { reason: { kind: 'completed' } } },
+    ]
     const messages = [
       { role: 'user', content: [{ type: 'text', text: 'in' }] },
       { role: 'assistant', content: [{ type: 'text', text: longText }] },
     ]
-    const agent = fakeAgent('ws-1', [assistantEvent], messages)
+    const agent = fakeAgent('ws-1', events, messages)
     const service = new MainSessionService(deps({
       getAgent: (id) => id === 'ws-1' ? agent : undefined,
       workspaceOf: () => ({ id: 'ws-1', name: '项目 A' }),
@@ -164,7 +198,7 @@ describe('MainSessionService', () => {
     expect(result.workspaceName).toBe('项目 A')
   })
 
-  it('awaitReply times out when no new assistant message appears', async () => {
+  it('awaitReply times out when no turn/end appears', async () => {
     const agent = fakeAgent('ws-1', [], [])
     const service = new MainSessionService(deps({
       getAgent: (id) => id === 'ws-1' ? agent : undefined,

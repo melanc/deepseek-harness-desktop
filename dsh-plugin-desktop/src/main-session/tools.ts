@@ -148,12 +148,13 @@ export function registerMainSessionTools(
     defineTool({
       name: 'workspace_await_reply',
       description:
-        'Wait for a target session\'s next assistant reply and return a SUMMARY of it. ' +
-        'Use after workspace_send_message or workspace_create_session to collect the ' +
-        'outcome produced by the workspace session. The main session reports only the ' +
-        'summary (progress + result) to the user — never the full transcript; point the ' +
-        'user to the workspace session (workspaceId/workspaceName in the result) for details. ' +
-        'Times out after 5 minutes.',
+        'Wait for a target session\'s turn to FINISH (turn/end) and return a SUMMARY of its ' +
+        'final result. Optional: the main session normally relies on the completion ' +
+        'callback, which pushes each finished result automatically — prefer that and avoid ' +
+        'calling this tool after dispatching. Use it only when you explicitly need a ' +
+        'synchronous result. The main session reports only the summary (progress + result) ' +
+        'to the user — never the full transcript; point the user to the workspace session ' +
+        '(workspaceId/workspaceName in the result) for details. Times out after 5 minutes.',
       parameters: {
         sessionId: {
           type: 'string',
