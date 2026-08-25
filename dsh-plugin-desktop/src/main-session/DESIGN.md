@@ -64,18 +64,29 @@
 ```
 src/main-session/
   types.ts            WorkspaceSessionView / ListSessionsResult / SendMessageResult / AwaitReplyResult / CreateWorkspaceSessionRequest / MAIN_SESSION_ID
-  service.ts          MainSessionService：agent 生命周期、listSessions、sendMessage、awaitReply（摘要化）、createWorkspaceSession（纯逻辑，deps 注入）
+  service.ts          MainSessionService：agent 生命周期、listSessions、sendMessage、awaitReply（摘要化）、createWorkspaceSession（纯逻辑，deps 注入）、deriveSessionTitle（标题派生）
   tools.ts            四个编排工具（defineTool），注册到主 agent scope
   persona.ts          主会话 persona（简洁调度者 system prompt 段）
   workspace-path.ts   默认工作区根目录（~/.dsh/workspaces/）+ slugify + 目录创建
   completion-callback.ts  工作区完成回调：监听 turn/end、匹配派发台账、摘要注入主会话（纯协调逻辑，deps 注入）
+  topology-reconcile.ts  启动拓扑清理：删除缺失目录的非法工作区、归档游离会话（纯协调逻辑，deps 注入）
   index.ts            Host 插件：ctx.get 解析依赖 + 惰性 agent 创建 + ctx.mainSession service
 
 tests/
-  main-session.spec.ts                   17 个单元测试
+  main-session.spec.ts                   25 个单元测试（含 deriveSessionTitle 6 个）
   main-session-workspace-path.spec.ts    4 个测试（slugify / 默认根目录）
   main-session-completion-callback.spec.ts  11 个测试（turn/end 匹配 / 摘要 / 失败 / 通知渲染）
+  main-session-topology-reconcile.spec.ts    11 个测试（非法工作区删除 / 游离会话归档 / 失败降级）
 ```
+
+### 启动拓扑清理（topology-reconcile.ts）
+
+冷启动时，工作区注册表可能携带陈旧记录与游离会话，在侧边栏渲染成一个"未分组"bucket。主会话 attach 到自身工作区之后，插件执行一次 best-effort、幂等的清理：
+
+1. **非法工作区**：`workspaceRegistry.list()` 中 `status() === 'missing-dir'`（目录已不存在）的注册记录被 `delete()` 移除；目录与会话日志保留。
+2. **游离会话**：live agent + 持久化会话中，不属于任何工作区且未归档的会话被 `archiveSession()` 归档——从各分组视图隐藏，日志与工作区记账保留、可恢复。
+
+主会话 id 始终豁免（即使 attach 尚未落账也不会被归档）。任一步失败只记录日志、不阻塞启动。
 
 ---
 
@@ -139,8 +150,9 @@ agent.followup(userMessage)   // 唤醒驱动器，作为 next-turn 输入
 2. `workspaceRegistry.create(path, title)` — 确保工作区存在（已存在则复用，幂等）；
 3. `agents.create({ sessionId, meta: { cwd: workspacePath } })` — 创建 cwd 指向工作区目录的 agent；
 4. `workspaceRegistry.attachSession(sessionId)` — 挂载到工作区（校验 header cwd 与工作区路径 realpath 一致）；
-5. 若有 `task`，`agent.followup(createUserMessage(...))` 发布初始任务；
-6. 返回 `{ sessionId, workspaceId }`。
+5. **命名会话**：`deriveSessionTitle(sessionTitle, task)` 确定标题（显式 `sessionTitle` 优先，否则取 task 首行、折叠空白并截断到 60 字符），通过 `sessionTitle.rename(agent.session, title)` 落盘——让侧边栏直接显示工作内容，而不是空白"新会话"。best-effort：标题服务缺失或标题非法只记日志，不使创建失败；
+6. 若有 `task`，`agent.followup(createUserMessage(...))` 发布初始任务；
+7. 返回 `{ sessionId, workspaceId }`。
 
 > **工作区文件夹**：主会话创建的工作区会话，其执行期间创建的所有文件都落在 `~/.dsh/workspaces/<title>/` 下——每个工作区一个独立文件夹，天然隔离。依赖 `workspaceRegistry` 服务；缺失时返回错误。工作区会话是普通 agent（不注册编排工具），只有主会话能调度它。
 
@@ -152,7 +164,7 @@ agent.followup(userMessage)   // 唤醒驱动器，作为 next-turn 输入
 |------|------|------|
 | `workspace_list_sessions` | — | `{ sessions, ungrouped, complete }` |
 | `workspace_send_message` | `sessionId`, `message` | `{ success, error? }` |
-| `workspace_create_session` | `workspacePath?`, `workspaceTitle?`, `task?` | `{ success, sessionId?, workspaceId?, error? }` |
+| `workspace_create_session` | `workspacePath?`, `workspaceTitle?`, `task?`, `sessionTitle?` | `{ success, sessionId?, workspaceId?, error? }` |
 | `workspace_await_reply` | `sessionId`, `timeoutMs?`, `maxReplyChars?` | `{ sessionId, summary?, workspaceId?, workspaceName?, timedOut, awaitingApproval?, error? }` |
 | `task_progress_update` | `taskId`, `description`, `subtasks`, `pendingConfirmations?` | `{ success, task?, error? }` |
 | `task_progress_query` | `taskId?`, `limit?` | `{ tasks, complete, error? }` |
@@ -199,8 +211,9 @@ DSH 的 service 类型声明未发布，desktop 插件按既有惯例用 `ctx.ge
 | `sessions` | `sessions` | 读 session header（活跃时间）、deriveMessages（计数/回复） |
 | `workspaceRegistry` | `workspaceRegistry` | 工作区 → sessionIds 归属（可选，缺失时枚举只含 ungrouped） |
 | `sessionQuery` | `sessionQuery` | 会话标题（可选，缺失时无标题） |
+| `sessionPersistence` | `sessionPersistence` | 持久化会话枚举（启动拓扑清理用，可选） |
 
-插件 `inject: ['agents', 'sessions']`（静态）；workspaceRegistry/sessionQuery 用 `ctx.get` 动态探测，缺失时优雅降级。
+插件 `inject: ['agents', 'sessions']`（静态）；workspaceRegistry/sessionQuery/sessionPersistence 用 `ctx.get` 动态探测，缺失时优雅降级。
 
 ---
 
@@ -219,7 +232,7 @@ DSH 的 service 类型声明未发布，desktop 插件按既有惯例用 `ctx.ge
 |------|------|
 | `yarn typecheck` | ✅ |
 | `yarn build`（lib/main-session.js 12.9 kB） | ✅ |
-| `yarn test`（35 文件 / 308 测试，含 main-session 9 个） | ✅ |
+| `yarn test`（main-session 系列 8 文件 / 79 测试） | ✅ |
 | `yarn verify:profile`（插件装配） | ✅ |
 
 ---

@@ -157,11 +157,49 @@ const CSS = `
 .dshDesktopSettingsButtonSecondary { color: var(--dsw-alias-label-secondary); }
 .dshDesktopSettingsButtonDanger { color: var(--dsw-alias-state-error-primary); }
 .dshDesktopSettingsButton:disabled { cursor: default; opacity: .55; }
-.dshDesktopSettingsTerminalAction {
+.dshDesktopNativeActions[data-placement="settings"] {
   display: flex;
   align-items: center;
   gap: 8px;
 }
+.dshDesktopNativeActions[data-placement="settings"] .dshDesktopNativeActionMenuAnchor { position: relative; }
+.dshDesktopNativeActions[data-placement="settings"] .dshDesktopActionMenu {
+  position: absolute;
+  z-index: 2147483001;
+  top: calc(100% + 5px);
+  right: 0;
+  display: grid;
+  grid-auto-flow: row;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 220px;
+  padding: 5px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 10px;
+  background: var(--dsw-alias-bg-layer-1);
+  box-shadow: 0 12px 32px color-mix(in srgb, #000 28%, transparent);
+  -webkit-app-region: no-drag;
+}
+.dshDesktopNativeActions[data-placement="settings"] .dshDesktopActionMenuItem {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-height: 32px;
+  padding: 5px 9px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  text-align: start;
+  white-space: nowrap;
+}
+.dshDesktopNativeActions[data-placement="settings"] .dshDesktopActionMenuItem:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover); }
+.dshDesktopNativeActions[data-placement="settings"] .dshDesktopActionMenuItem:disabled { cursor: default; opacity: .45; }
+.dshDesktopNativeActions[data-placement="settings"] .dshDesktopActionMenuItem svg { width: 14px; height: 14px; stroke-width: 1.8; }
+.dshDesktopNativeActions[data-placement="settings"] .dshDesktopActionMenuItem span { flex: 1; }
 .dshDesktopSettingsHeaderButton {
   display: inline-flex;
   align-items: center;
@@ -177,14 +215,39 @@ const CSS = `
   font-size: 12px;
   line-height: 18px;
 }
+.dshDesktopSettingsHeaderButton svg { width: 14px; height: 14px; margin-left: 5px; }
 .dshDesktopSettingsHeaderButton:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover); }
 .dshDesktopSettingsHeaderButton:disabled { cursor: not-allowed; opacity: .4; }
-.dshDesktopSettingsTerminalError {
+.dshDesktopNativeActionError {
   max-width: 260px;
   color: var(--dsw-alias-state-error-primary);
   font-size: 11px;
   line-height: 1.4;
 }
+.dshDesktopSettingsMaterialField {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 10px;
+  background: var(--dsw-alias-bg-layer-1);
+}
+.dshDesktopSettingsMaterialCopy { min-width: 0; }
+.dshDesktopSettingsSelect {
+  flex: 0 0 auto;
+  min-width: 150px;
+  min-height: 32px;
+  padding: 4px 28px 4px 10px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 12px;
+}
+.dshDesktopSettingsSelect:disabled { opacity: .55; }
 .dshDesktopSettingsNotice,
 .dshDesktopSettingsError,
 .dshDesktopSettingsSuccess {

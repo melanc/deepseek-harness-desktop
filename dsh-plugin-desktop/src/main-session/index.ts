@@ -39,11 +39,12 @@ import { registerActivityTools } from './activity-tools.ts'
 import { TaskProgressStore } from './task-progress.ts'
 import { registerTaskProgressSection } from './task-progress-persona.ts'
 import { registerTaskProgressTools } from './task-progress-tools.ts'
-import { MainSessionService, sessionIdOf } from './service.ts'
+import { MainSessionService, sessionIdOf, deriveSessionTitle } from './service.ts'
 import { registerMainSessionTools } from './tools.ts'
 import { registerMainSessionPersona } from './persona.ts'
 import { resolveDefaultWorkspacePath } from './workspace-path.ts'
 import { handleSessionEvent, buildNotificationMessage, type TurnEndEvent, type CompletionSessionView } from './completion-callback.ts'
+import { reconcileWorkspaceTopology } from './topology-reconcile.ts'
 
 /** Stable Cordis plugin name. */
 export const name = 'main-session'
@@ -80,15 +81,21 @@ interface SessionsStore {
 }
 
 interface WorkspaceRegistry {
-  list(): Array<{ id: string; title: string; path?: string; sessionIds: unknown[] }>
+  list(): WorkspaceEntity[]
   resolveByPath?(path: string): Promise<{ id: string; title: string; path?: string } | undefined>
   create(path: string, title?: string): Promise<WorkspaceEntity>
+  delete(id: string): Promise<boolean>
+  archiveSession(sessionId: unknown): Promise<void>
+  readonly archivedSessionIds: readonly unknown[]
 }
 
-/** A workspace record returned by {@link WorkspaceRegistry.create}. */
+/** A workspace record returned by {@link WorkspaceRegistry.create} or {@link WorkspaceRegistry.list}. */
 interface WorkspaceEntity {
   id: string
   title: string
+  path?: string
+  sessionIds: readonly unknown[]
+  status(): Promise<'ok' | 'missing-dir'>
   attachSession(sessionId: unknown): Promise<void>
 }
 
@@ -506,6 +513,22 @@ export function apply(ctx: Context): void {
         })
         // 3. Attach to the workspace (validates header cwd against the path).
         await ws.attachSession(sessionIdOf(newSessionId))
+        // 3.5 Name the session so the sidebar shows its work content instead of
+        //     a blank "new session". Explicit sessionTitle wins; otherwise the
+        //     task's first line is used. Best-effort: a missing title service or
+        //     an invalid title never fails the create.
+        const title = deriveSessionTitle(options.sessionTitle, options.task)
+        if (title !== undefined) {
+          const titleAgent = agents.get(sessionIdOf(newSessionId))
+          const titles = resolveSessionTitle()
+          if (titleAgent !== undefined && titles !== undefined) {
+            try {
+              titles.rename(titleAgent.session, title)
+            } catch (err) {
+              ctx.logger.warn(`${LOG_TAG} workspace session "${newSessionId}" title failed:`, err)
+            }
+          }
+        }
         // 4. Dispatch the initial task, if any.
         if (options.task !== undefined && options.task.trim() !== '') {
           const agent = agents.get(sessionIdOf(newSessionId))
@@ -583,11 +606,42 @@ export function apply(ctx: Context): void {
     return stop
   }, 'main-session: workspace completion callback')
 
+  // ── Startup topology reconciliation ─────────────────────────────────────
+  // After the main session is attached to its own workspace, drop invalid
+  // workspaces (missing directories) and archive stray sessions so the sidebar
+  // never shows a "未分组" bucket at cold start. Best-effort: failures log and
+  // never block startup, and the main session id is always exempt.
+  const reconcileStartupTopology = async (): Promise<void> => {
+    const workspaceRegistry = resolveWorkspaceRegistry()
+    if (workspaceRegistry === undefined) {
+      ctx.logger.warn(`${LOG_TAG} topology reconcile skipped: workspace registry unavailable`)
+      return
+    }
+    const persistence = ctx.get('sessionPersistence') as unknown as SessionPersistence | undefined
+    const report = await reconcileWorkspaceTopology({
+      workspaceRegistry,
+      listLiveAgents: () => agents.list(),
+      listPersisted: async () => persistence === undefined ? [] : await persistence.list(),
+      log: {
+        info: (message) => ctx.logger.info(message),
+        warn: (message, err) => ctx.logger.warn(message, err),
+      },
+    })
+    if (report.removedWorkspaces.length > 0 || report.archivedSessions.length > 0) {
+      ctx.logger.info(`${LOG_TAG} topology reconcile done: ${report.removedWorkspaces.length} workspace(s) removed, ${report.archivedSessions.length} session(s) archived`)
+    }
+  }
+
   // ── Lifecycle ───────────────────────────────────────────────────────────
   ctx.effect(() => {
     // Create the main agent at activation so the sidebar entry always has a
     // live session to open (failures are logged, never block startup).
-    void innerService.getMainAgent().catch((err) => {
+    void innerService.getMainAgent().then(() => {
+      // Main session is attached to its workspace; now reconcile the topology.
+      return reconcileStartupTopology().catch((err) => {
+        ctx.logger.warn(`${LOG_TAG} topology reconcile failed:`, err)
+      })
+    }).catch((err) => {
       console.error(`${LOG_TAG} main agent activation failed:`, err)
     })
     return () => {

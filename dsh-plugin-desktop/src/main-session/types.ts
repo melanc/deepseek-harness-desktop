@@ -215,6 +215,8 @@ export interface CreateWorkspaceSessionRequest {
   readonly workspaceTitle?: string
   /** Initial task message dispatched to the new session. */
   readonly task?: string
+  /** Explicit session display title; falls back to a task-derived title. */
+  readonly sessionTitle?: string
   /** Optional session id (defaults to a generated uuid). */
   readonly sessionId?: string
 }

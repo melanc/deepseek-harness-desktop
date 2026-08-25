@@ -122,6 +122,11 @@ export function registerMainSessionTools(
           type: 'string',
           description: 'Initial task message dispatched to the new session.',
         },
+        sessionTitle: {
+          type: 'string',
+          description:
+            'Optional session display title shown in the sidebar. Omit to derive one from the first line of `task`.',
+        },
       },
       output: {
         schema: {
@@ -134,12 +139,13 @@ export function registerMainSessionTools(
           }]
         },
       },
-      async execute(args: { workspacePath?: string; workspaceTitle?: string; task?: string }) {
+      async execute(args: { workspacePath?: string; workspaceTitle?: string; task?: string; sessionTitle?: string }) {
         return JSON.parse(JSON.stringify(
           await service.createWorkspaceSession({
             ...(args.workspacePath === undefined ? {} : { workspacePath: args.workspacePath }),
             ...(args.workspaceTitle === undefined ? {} : { workspaceTitle: args.workspaceTitle }),
             ...(args.task === undefined ? {} : { task: args.task }),
+            ...(args.sessionTitle === undefined ? {} : { sessionTitle: args.sessionTitle }),
           }),
         )) as never
       },

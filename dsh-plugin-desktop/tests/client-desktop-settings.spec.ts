@@ -1,5 +1,17 @@
 import { describe, expect, it, vi } from 'vitest'
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
 import type { ClientContext, SettingsScope } from '@deepseek-ai/dsh-client-runtime/client'
+import {
+  DesktopDeveloperMenuItems,
+  DesktopNativeActions,
+  DesktopRestartMenuItems,
+} from '../src/client/DesktopNativeActions.tsx'
+import {
+  DesktopModeControl,
+  DesktopVersionControl,
+  selectDesktopFrameMode,
+} from '../src/client/ExtendedTitlebar.tsx'
 import { DesktopSettingsSection } from '../src/client/DesktopSettingsSection.tsx'
 import { DesktopTerminalSettingsAction } from '../src/client/DesktopTerminalSettingsAction.tsx'
 import {
@@ -16,6 +28,8 @@ import {
   DESKTOP_SETTINGS_LOCALE_NAMESPACE,
   DESKTOP_SHELL_SETTINGS_NAMESPACE,
 } from '../src/client/desktop-settings.ts'
+import { en, type DesktopSettingsLocaleKey } from '../src/client/desktop-settings-locales.ts'
+import { installDesktopSettingsStyles } from '../src/client/desktop-settings-styles.ts'
 
 const VIEW: DesktopSettingsView = {
   current: 'desktop',
@@ -54,7 +68,15 @@ describe('Desktop settings API', () => {
   it('uses the strict same-origin routes and request bodies', async () => {
     const fetcher = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
       const path = String(input)
-      if (path === desktopSettingsPaths.terminalOpen) return json({ accepted: true })
+      if (path === desktopSettingsPaths.terminalOpen
+        || path === desktopSettingsPaths.restart
+        || path === desktopSettingsPaths.recoveryRestart
+        || path === desktopSettingsPaths.rendererReload
+        || path === desktopSettingsPaths.developerToolsToggle
+        || path === desktopSettingsPaths.updateCheck
+        || path === desktopSettingsPaths.diagnosticsExport) {
+        return json({ accepted: true })
+      }
       return path === desktopSettingsPaths.settings || path === desktopSettingsPaths.profileCreate || path === desktopSettingsPaths.profileDelete
         ? json(VIEW)
         : json({ accepted: true, restartRequired: true })
@@ -67,6 +89,12 @@ describe('Desktop settings API', () => {
     await expect(api.deleteProfile('work')).resolves.toEqual(VIEW)
     await expect(api.selectMarket('community-market')).resolves.toEqual({ accepted: true, restartRequired: true })
     await expect(api.openTerminal()).resolves.toBeUndefined()
+    await expect(api.restart()).resolves.toBeUndefined()
+    await expect(api.restartToRecovery()).resolves.toBeUndefined()
+    await expect(api.reloadRenderer()).resolves.toBeUndefined()
+    await expect(api.toggleDeveloperTools()).resolves.toBeUndefined()
+    await expect(api.checkForUpdates()).resolves.toBeUndefined()
+    await expect(api.exportDiagnostics()).resolves.toBeUndefined()
 
     expect(fetcher.mock.calls.map(call => call[0])).toEqual([
       desktopSettingsPaths.settings,
@@ -75,6 +103,12 @@ describe('Desktop settings API', () => {
       desktopSettingsPaths.profileDelete,
       desktopSettingsPaths.marketSelect,
       desktopSettingsPaths.terminalOpen,
+      desktopSettingsPaths.restart,
+      desktopSettingsPaths.recoveryRestart,
+      desktopSettingsPaths.rendererReload,
+      desktopSettingsPaths.developerToolsToggle,
+      desktopSettingsPaths.updateCheck,
+      desktopSettingsPaths.diagnosticsExport,
     ])
     expect(fetcher.mock.calls[1]?.[1]).toMatchObject({
       method: 'POST',
@@ -92,6 +126,26 @@ describe('Desktop settings API', () => {
       method: 'POST',
       body: JSON.stringify({}),
     })
+    expect(fetcher.mock.calls[6]?.[1]).toMatchObject({
+      method: 'POST',
+      body: JSON.stringify({}),
+    })
+    expect(fetcher.mock.calls[7]?.[1]).toMatchObject({
+      method: 'POST',
+      body: JSON.stringify({}),
+    })
+    expect(fetcher.mock.calls[8]?.[1]).toMatchObject({
+      method: 'POST',
+      body: JSON.stringify({}),
+    })
+    expect(fetcher.mock.calls[9]?.[1]).toMatchObject({
+      method: 'POST',
+      body: JSON.stringify({}),
+    })
+    expect(fetcher.mock.calls[10]?.[1]).toMatchObject({
+      method: 'POST',
+      body: JSON.stringify({}),
+    })
   })
 
   it('does not reflect an untrusted error body into its public error', async () => {
@@ -101,8 +155,134 @@ describe('Desktop settings API', () => {
   })
 })
 
+describe('Desktop native action presentation', () => {
+  const api = {
+    exportDiagnostics: vi.fn(async () => {}),
+    openTerminal: vi.fn(async () => {}),
+    restart: vi.fn(async () => {}),
+    restartToRecovery: vi.fn(async () => {}),
+    reloadRenderer: vi.fn(async () => {}),
+    toggleDeveloperTools: vi.fn(async () => {}),
+    checkForUpdates: vi.fn(async () => {}),
+  }
+  const t = (key: DesktopSettingsLocaleKey): string => en[key]
+
+  it('uses accessible icon actions in the extended title bar', () => {
+    const markup = renderToStaticMarkup(createElement(DesktopNativeActions, {
+      api,
+      t,
+      placement: 'titlebar',
+    }))
+
+    expect(markup.match(/dshDesktopTitlebarIconButton/g)).toHaveLength(3)
+    expect(markup).toContain('aria-label="Open DSH Terminal"')
+    expect(markup).toContain('aria-label="Restart options"')
+    expect(markup).toContain('aria-label="Developer options"')
+  })
+
+  it('renders the Host-supplied version through the shadcn hover-card trigger', () => {
+    const markup = renderToStaticMarkup(createElement(DesktopVersionControl, {
+      version: '2.0.3',
+      checkForUpdates: api.checkForUpdates,
+      t,
+    }))
+
+    expect(markup).toContain('v2.0.3')
+    expect(markup).toContain('aria-label="Current version v2.0.3"')
+    expect(markup).toContain('data-slot="hover-card-trigger"')
+  })
+
+  it('renders the active presentation pill through a shadcn hover-card trigger', () => {
+    const markup = renderToStaticMarkup(createElement(DesktopModeControl, {
+      mode: 'extended',
+      setMode: vi.fn(async () => {}),
+      restart: vi.fn(async () => {}),
+      t,
+    }))
+
+    expect(markup).toContain('Extended window')
+    expect(markup).toContain('aria-label="Desktop appearance and behavior: Extended window"')
+    expect(markup).toContain('data-slot="hover-card-trigger"')
+  })
+
+  it('persists a presentation change before requesting the confirmed restart', async () => {
+    const order: string[] = []
+    const setMode = vi.fn(async (mode: string) => { order.push(`mode:${mode}`) })
+    const restart = vi.fn(async () => { order.push('restart') })
+
+    await selectDesktopFrameMode('advanced', setMode, restart)
+
+    expect(order).toEqual(['mode:advanced', 'restart'])
+  })
+
+  it('keeps explicit text labels in settings', () => {
+    const markup = renderToStaticMarkup(createElement(DesktopNativeActions, {
+      api,
+      t,
+      placement: 'settings',
+    }))
+
+    expect(markup).toContain('Open DSH Terminal')
+    expect(markup).toContain('Export Diagnostics')
+    expect(markup).toContain('Restart')
+    expect(markup).toContain('aria-haspopup="menu"')
+    expect(markup).not.toContain('Developer options')
+  })
+
+  it('groups reload with both restart actions and leaves only Developer Tools in its menu', () => {
+    const restartMarkup = renderToStaticMarkup(createElement(DesktopRestartMenuItems, {
+      busy: false,
+      t,
+      onReload: vi.fn(),
+      onRestart: vi.fn(),
+      onRestartToRecovery: vi.fn(),
+    }))
+    const developerMarkup = renderToStaticMarkup(createElement(DesktopDeveloperMenuItems, {
+      busy: false,
+      t,
+      onToggleDeveloperTools: vi.fn(),
+    }))
+
+    expect(restartMarkup.match(/role="menuitem"/g)).toHaveLength(3)
+    expect(restartMarkup.indexOf('Reload')).toBeLessThan(restartMarkup.indexOf('Restart'))
+    expect(restartMarkup.indexOf('Restart')).toBeLessThan(restartMarkup.indexOf('Restart in Recovery Mode'))
+    expect(restartMarkup).not.toContain('Toggle Developer Tools')
+    expect(developerMarkup.match(/role="menuitem"/g)).toHaveLength(1)
+    expect(developerMarkup).toContain('Toggle Developer Tools')
+    expect(developerMarkup).not.toContain('Reload')
+  })
+
+  it('installs a self-contained vertical settings menu in every presentation mode', () => {
+    let css = ''
+    const remove = vi.fn()
+    const style = {
+      id: '',
+      get textContent() { return css },
+      set textContent(value: string) { css = value },
+      remove,
+    }
+    const appendChild = vi.fn()
+    vi.stubGlobal('document', {
+      getElementById: () => null,
+      createElement: () => style,
+      head: { appendChild },
+    })
+
+    try {
+      const dispose = installDesktopSettingsStyles()
+      expect(css).toMatch(/data-placement="settings"\] \.dshDesktopActionMenu \{[^}]*position: absolute;[^}]*display: grid;[^}]*grid-auto-flow: row;[^}]*grid-template-columns: minmax\(0, 1fr\);[^}]*min-width: 220px;/)
+      expect(css).toMatch(/data-placement="settings"\] \.dshDesktopActionMenuItem \{[^}]*display: flex;[^}]*width: 100%;[^}]*white-space: nowrap;/)
+      expect(appendChild).toHaveBeenCalledWith(style)
+      dispose()
+      expect(remove).toHaveBeenCalledOnce()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+})
+
 describe('Desktop settings Slot registration', () => {
-  it('registers the official Desktop section, terminal action, and both settings scopes', () => {
+  it('registers the official Desktop section, native actions, and both settings scopes', async () => {
     const scope = {
       getSnapshot: () => ({
         status: 'loading' as const,
@@ -131,7 +311,13 @@ describe('Desktop settings Slot registration', () => {
       slots: { inject, register },
     } as unknown as ClientContext
 
-    applyDesktopSettings(ctx, { mode: 'compatibility', platform: 'darwin' })
+    const control = applyDesktopSettings(ctx, {
+      version: '2.0.3',
+      mode: 'compatibility',
+      platform: 'darwin',
+      material: 'off',
+      micaSupported: false,
+    })
 
     expect(bind).toHaveBeenNthCalledWith(1, { namespace: DESKTOP_SHELL_SETTINGS_NAMESPACE })
     expect(bind).toHaveBeenNthCalledWith(2, { namespace: DESKTOP_NOTIFICATIONS_SETTINGS_NAMESPACE })
@@ -148,7 +334,11 @@ describe('Desktop settings Slot registration', () => {
       locale: DESKTOP_SETTINGS_LOCALE_NAMESPACE,
     })
     expect(options.label()).toBe(`${DESKTOP_SETTINGS_LOCALE_NAMESPACE}:nav`)
-    expect(options.inject()).toMatchObject({ platform: 'darwin', initialMode: 'compatibility' })
+    expect(options.inject()).toMatchObject({
+      platform: 'darwin',
+      initialMode: 'compatibility',
+      micaSupported: false,
+    })
     expect(component).toBe(DesktopSettingsSection)
 
     const [actionOptions, actionComponent] = register.mock.calls[1] as unknown as [
@@ -163,5 +353,7 @@ describe('Desktop settings Slot registration', () => {
     })
     expect(actionOptions.inject()).toHaveProperty('api')
     expect(actionComponent).toBe(DesktopTerminalSettingsAction)
+    await control.setMode('extended')
+    expect(scope.set).toHaveBeenCalledWith('mode', 'extended')
   })
 })
