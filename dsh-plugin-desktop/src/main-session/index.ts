@@ -704,7 +704,9 @@ async function isMainSessionPersisted(ctx: Context): Promise<boolean> {
 function createMainSelection(ctx: Context): ModelSelectionRef {
   const service = ctx.get('agentDefaultModel') as unknown as AgentDefaultModelService | undefined
   return {
-    current: service?.currentSelection(),
+    get current(): ModelSelection | undefined {
+      return service?.currentSelection()
+    },
     assembled: undefined,
   }
 }
