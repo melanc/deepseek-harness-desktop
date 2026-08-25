@@ -69,13 +69,24 @@ src/main-session/
   persona.ts          主会话 persona（简洁调度者 system prompt 段）
   workspace-path.ts   默认工作区根目录（~/.dsh/workspaces/）+ slugify + 目录创建
   completion-callback.ts  工作区完成回调：监听 turn/end、匹配派发台账、摘要注入主会话（纯协调逻辑，deps 注入）
+  topology-reconcile.ts  启动拓扑清理：删除缺失目录的非法工作区、归档游离会话（纯协调逻辑，deps 注入）
   index.ts            Host 插件：ctx.get 解析依赖 + 惰性 agent 创建 + ctx.mainSession service
 
 tests/
   main-session.spec.ts                   17 个单元测试
   main-session-workspace-path.spec.ts    4 个测试（slugify / 默认根目录）
   main-session-completion-callback.spec.ts  11 个测试（turn/end 匹配 / 摘要 / 失败 / 通知渲染）
+  main-session-topology-reconcile.spec.ts    11 个测试（非法工作区删除 / 游离会话归档 / 失败降级）
 ```
+
+### 启动拓扑清理（topology-reconcile.ts）
+
+冷启动时，工作区注册表可能携带陈旧记录与游离会话，在侧边栏渲染成一个"未分组"bucket。主会话 attach 到自身工作区之后，插件执行一次 best-effort、幂等的清理：
+
+1. **非法工作区**：`workspaceRegistry.list()` 中 `status() === 'missing-dir'`（目录已不存在）的注册记录被 `delete()` 移除；目录与会话日志保留。
+2. **游离会话**：live agent + 持久化会话中，不属于任何工作区且未归档的会话被 `archiveSession()` 归档——从各分组视图隐藏，日志与工作区记账保留、可恢复。
+
+主会话 id 始终豁免（即使 attach 尚未落账也不会被归档）。任一步失败只记录日志、不阻塞启动。
 
 ---
 
@@ -199,8 +210,9 @@ DSH 的 service 类型声明未发布，desktop 插件按既有惯例用 `ctx.ge
 | `sessions` | `sessions` | 读 session header（活跃时间）、deriveMessages（计数/回复） |
 | `workspaceRegistry` | `workspaceRegistry` | 工作区 → sessionIds 归属（可选，缺失时枚举只含 ungrouped） |
 | `sessionQuery` | `sessionQuery` | 会话标题（可选，缺失时无标题） |
+| `sessionPersistence` | `sessionPersistence` | 持久化会话枚举（启动拓扑清理用，可选） |
 
-插件 `inject: ['agents', 'sessions']`（静态）；workspaceRegistry/sessionQuery 用 `ctx.get` 动态探测，缺失时优雅降级。
+插件 `inject: ['agents', 'sessions']`（静态）；workspaceRegistry/sessionQuery/sessionPersistence 用 `ctx.get` 动态探测，缺失时优雅降级。
 
 ---
 
@@ -219,7 +231,7 @@ DSH 的 service 类型声明未发布，desktop 插件按既有惯例用 `ctx.ge
 |------|------|
 | `yarn typecheck` | ✅ |
 | `yarn build`（lib/main-session.js 12.9 kB） | ✅ |
-| `yarn test`（35 文件 / 308 测试，含 main-session 9 个） | ✅ |
+| `yarn test`（main-session 系列 8 文件 / 72 测试） | ✅ |
 | `yarn verify:profile`（插件装配） | ✅ |
 
 ---
