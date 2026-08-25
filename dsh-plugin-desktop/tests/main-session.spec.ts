@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { Agent, AgentHandle } from '@deepseek-ai/dsh-agent'
-import { MainSessionService, type MainSessionDeps } from '../src/main-session/service.ts'
+import { MainSessionService, deriveSessionTitle, type MainSessionDeps } from '../src/main-session/service.ts'
 import { MAIN_SESSION_ID } from '../src/main-session/types.ts'
 
 // ============================================================
@@ -309,6 +309,7 @@ describe('MainSessionService', () => {
       workspacePath: '/workspaces/proj-a',
       workspaceTitle: '项目 A',
       task: '完成重构',
+      sessionTitle: '重构订单模块',
     })
     expect(result.success).toBe(true)
     expect(result.sessionId).toBe('ws-session-abc')
@@ -316,6 +317,21 @@ describe('MainSessionService', () => {
     expect(createWorkspaceSession).toHaveBeenCalledWith({
       workspacePath: '/workspaces/proj-a',
       workspaceTitle: '项目 A',
+      task: '完成重构',
+      sessionTitle: '重构订单模块',
+    })
+  })
+
+  it('omits sessionTitle from the deps call when it is not provided', async () => {
+    const createWorkspaceSession = vi.fn(async () => ({
+      sessionId: 'ws-session-abc',
+      workspaceId: 'ws-9',
+    }))
+    const service = new MainSessionService(deps({ createWorkspaceSession }))
+
+    await service.createWorkspaceSession({ workspacePath: '/x', task: '完成重构' })
+    expect(createWorkspaceSession).toHaveBeenCalledWith({
+      workspacePath: '/x',
       task: '完成重构',
     })
   })
@@ -331,5 +347,38 @@ describe('MainSessionService', () => {
     const result = await service.createWorkspaceSession({ workspacePath: '/x' })
     expect(result.success).toBe(false)
     expect(result.error).toContain('boom')
+  })
+})
+
+// ============================================================
+// deriveSessionTitle
+// ============================================================
+
+describe('deriveSessionTitle', () => {
+  it('prefers an explicit sessionTitle over the task', () => {
+    expect(deriveSessionTitle('重构订单模块', '请完成重构')).toBe('重构订单模块')
+  })
+
+  it('falls back to the first line of the task, whitespace-collapsed', () => {
+    expect(deriveSessionTitle(undefined, '重构订单模块\n第二行')).toBe('重构订单模块')
+  })
+
+  it('trims surrounding whitespace and collapses inner whitespace', () => {
+    expect(deriveSessionTitle(undefined, '  重构   订单  \nnext')).toBe('重构 订单')
+  })
+
+  it('truncates an over-long first line to the character budget', () => {
+    const long = 'x'.repeat(100)
+    expect(deriveSessionTitle(undefined, long)).toHaveLength(60)
+  })
+
+  it('returns undefined when neither source has visible text', () => {
+    expect(deriveSessionTitle(undefined, undefined)).toBeUndefined()
+    expect(deriveSessionTitle('   ', undefined)).toBeUndefined()
+    expect(deriveSessionTitle(undefined, '   \n  ')).toBeUndefined()
+  })
+
+  it('returns the explicit title even when the task is empty', () => {
+    expect(deriveSessionTitle('只改标题', undefined)).toBe('只改标题')
   })
 })

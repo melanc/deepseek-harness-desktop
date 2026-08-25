@@ -39,7 +39,7 @@ import { registerActivityTools } from './activity-tools.ts'
 import { TaskProgressStore } from './task-progress.ts'
 import { registerTaskProgressSection } from './task-progress-persona.ts'
 import { registerTaskProgressTools } from './task-progress-tools.ts'
-import { MainSessionService, sessionIdOf } from './service.ts'
+import { MainSessionService, sessionIdOf, deriveSessionTitle } from './service.ts'
 import { registerMainSessionTools } from './tools.ts'
 import { registerMainSessionPersona } from './persona.ts'
 import { resolveDefaultWorkspacePath } from './workspace-path.ts'
@@ -513,6 +513,22 @@ export function apply(ctx: Context): void {
         })
         // 3. Attach to the workspace (validates header cwd against the path).
         await ws.attachSession(sessionIdOf(newSessionId))
+        // 3.5 Name the session so the sidebar shows its work content instead of
+        //     a blank "new session". Explicit sessionTitle wins; otherwise the
+        //     task's first line is used. Best-effort: a missing title service or
+        //     an invalid title never fails the create.
+        const title = deriveSessionTitle(options.sessionTitle, options.task)
+        if (title !== undefined) {
+          const titleAgent = agents.get(sessionIdOf(newSessionId))
+          const titles = resolveSessionTitle()
+          if (titleAgent !== undefined && titles !== undefined) {
+            try {
+              titles.rename(titleAgent.session, title)
+            } catch (err) {
+              ctx.logger.warn(`${LOG_TAG} workspace session "${newSessionId}" title failed:`, err)
+            }
+          }
+        }
         // 4. Dispatch the initial task, if any.
         if (options.task !== undefined && options.task.trim() !== '') {
           const agent = agents.get(sessionIdOf(newSessionId))

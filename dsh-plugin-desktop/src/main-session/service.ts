@@ -77,6 +77,7 @@ export interface MainSessionDeps {
     workspacePath?: string
     workspaceTitle?: string
     task?: string
+    sessionTitle?: string
     sessionId?: string
   }): Promise<{
     sessionId: string
@@ -235,6 +236,7 @@ export class MainSessionService {
       workspacePath?: string
       workspaceTitle?: string
       task?: string
+      sessionTitle?: string
       sessionId?: string
     },
   ): Promise<CreateWorkspaceSessionResult> {
@@ -243,6 +245,7 @@ export class MainSessionService {
         ...(options.workspacePath === undefined ? {} : { workspacePath: options.workspacePath }),
         ...(options.workspaceTitle === undefined ? {} : { workspaceTitle: options.workspaceTitle }),
         ...(options.task === undefined ? {} : { task: options.task }),
+        ...(options.sessionTitle === undefined ? {} : { sessionTitle: options.sessionTitle }),
         ...(options.sessionId === undefined ? {} : { sessionId: options.sessionId }),
       })
       if (created.error !== undefined) {
@@ -454,4 +457,25 @@ export function summarize(text: string, maxChars: number): string {
 /** Brand a raw session id (identity helper, mirrors dsh-session's brand). */
 export function sessionIdOf(value: string): SessionId {
   return value as SessionId
+}
+
+/** Max characters of a title derived from a task's first line. */
+export const DERIVED_TITLE_MAX_CHARS = 60
+
+/**
+ * Resolve a new workspace session's display title: an explicit `sessionTitle`
+ * wins; otherwise the task's first line (whitespace-collapsed) is used. Returns
+ * `undefined` when neither yields visible text.
+ * @param sessionTitle - explicit title, if the caller supplied one.
+ * @param task - initial task text, used as the fallback source.
+ * @returns the title to apply, or `undefined` to leave the session blank.
+ */
+export function deriveSessionTitle(sessionTitle: string | undefined, task: string | undefined): string | undefined {
+  const explicit = sessionTitle?.trim()
+  if (explicit !== undefined && explicit !== '') return explicit
+  const firstLine = task?.trim().split(/\r?\n/, 1)[0]?.trim().replace(/\s+/g, ' ')
+  if (firstLine === undefined || firstLine === '') return undefined
+  return firstLine.length <= DERIVED_TITLE_MAX_CHARS
+    ? firstLine
+    : firstLine.slice(0, DERIVED_TITLE_MAX_CHARS)
 }
