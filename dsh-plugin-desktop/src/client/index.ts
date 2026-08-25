@@ -11,14 +11,17 @@ import { startRendererBootReporter } from './boot-health.ts'
 import { applyDesktopSettings } from './desktop-settings.ts'
 import { installDesktopDirectoryPickerBridge, requestDesktopDirectoryValidation } from './directory-picker.ts'
 import { parseDesktopClientEnvironment } from './environment.ts'
+import { applyExtendedShell, applyFramedShell } from './extended-shell.ts'
 import { applyMessageChannelsSection } from './message-channels/index.tsx'
 import { installSidebarFooterStyles } from './styles.ts'
 import { applyTasksView } from './tasks-view/index.tsx'
 import { installWorkspaceFolderDrop } from './workspace-folder-drop.ts'
+import { desktopWindowService, provideDesktopWindow } from './window-service.ts'
 
 export { applyAdvancedShell } from './advanced-shell.ts'
 export { applyArchiveConfirm, ARCHIVE_CONFIRM_OVERLAY_ID } from './archive-confirm/index.ts'
 export { applyDesktopSettings } from './desktop-settings.ts'
+export { applyExtendedShell, applyFramedShell } from './extended-shell.ts'
 export {
   createDesktopSettingsApi,
   desktopSettingsPaths,
@@ -54,11 +57,22 @@ export {
 } from './boot-health.ts'
 export type { RendererBootLoader, RendererBootReport } from './boot-health.ts'
 export { parseDesktopClientEnvironment } from './environment.ts'
-export type { DesktopClientEnvironment, DesktopClientMode, DesktopClientPlatform } from './environment.ts'
+export type {
+  DesktopClientEnvironment,
+  DesktopClientMaterial,
+  DesktopClientMode,
+  DesktopClientPlatform,
+} from './environment.ts'
 export { applyMessageChannelsSection } from './message-channels/index.tsx'
 export { applyTasksView, TASKS_VIEW_ID } from './tasks-view/index.tsx'
+export { desktopWindowService, provideDesktopWindow } from './window-service.ts'
+export type {
+  DesktopWindowDragRegion,
+  DesktopWindowInsets,
+  DesktopWindowService,
+} from './contracts.ts'
 
-/** Services required by Desktop settings and advanced presentation. */
+/** Services required by Desktop settings and Desktop-owned presentations. */
 export const inject = [
   'slots',
   'locale',
@@ -75,7 +89,11 @@ export const inject = [
 export function apply(ctx: ClientContext): void {
   const environment = parseDesktopClientEnvironment(window.location.search)
   if (!environment) return
-  applyDesktopSettings(ctx, environment)
+  ctx.effect(
+    () => provideDesktopWindow(ctx, desktopWindowService(environment)),
+    'dsh-plugin-desktop: native window geometry service',
+  )
+  const desktopSettings = applyDesktopSettings(ctx, environment)
   ctx.effect(
     () => startRendererBootReporter(ctx.loader),
     'dsh-plugin-desktop: renderer boot health report',
@@ -103,6 +121,10 @@ export function apply(ctx: ClientContext): void {
     )
   }
   if (environment.mode === 'advanced') applyAdvancedShell(ctx, environment)
+  if (environment.mode === 'extended') applyExtendedShell(ctx, environment, desktopSettings)
+  if (environment.platform !== 'linux' && environment.mode === 'compatibility') {
+    applyFramedShell(ctx, environment, desktopSettings)
+  }
 
   // Message-channels settings section: registers a `settings.section` page
   // when the settings scope service is available (composed by ui-settings).

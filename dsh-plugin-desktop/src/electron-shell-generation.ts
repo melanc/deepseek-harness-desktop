@@ -6,18 +6,28 @@ import {
   nativeImage,
   nativeTheme,
   Notification,
+  screen,
   shell,
   Tray,
 } from 'electron'
 import { formatDesktopExitCode } from './desktop-logger.ts'
+import { showDesktopMessageBox } from './desktop-dialog-window.ts'
 import { applicationNeedsReveal, revealApplication } from './electron-reveal.ts'
 import type { ElectronPlatformStrategy } from './electron-platform.ts'
 import type { DesktopNotification, DesktopShellSpec } from './runtime.ts'
 import { prepareTrayIcon } from './tray-icons.ts'
 import { desktopWindowOptions } from './window-options.ts'
+import { setWindowsAcrylic } from './windows-acrylic.ts'
+import {
+  fitMainWindowBounds,
+  sameMainWindowBounds,
+  type MainWindowBounds,
+  type MainWindowStateStore,
+} from './main-window-state.ts'
 
 const MIN_ZOOM_LEVEL = -4
 const MAX_ZOOM_LEVEL = 4
+const WINDOW_STATE_WRITE_DELAY_MS = 250
 
 function clampedZoomLevel(level: number): number {
   return Math.min(MAX_ZOOM_LEVEL, Math.max(MIN_ZOOM_LEVEL, level))
@@ -42,6 +52,7 @@ export interface ElectronShellGenerationOptions {
   readonly abortRendererBootMonitoring: (cause: unknown) => void
   readonly failRendererBoot: (error: string) => void
   readonly logError: (message: string) => void
+  readonly mainWindowState: MainWindowStateStore
 }
 
 /** Own one BrowserWindow and Tray generation, including every native listener. */
@@ -51,6 +62,9 @@ export class ElectronShellGeneration {
   private mounted = false
   private released = false
   private attentionCount = 0
+  private prepareFullscreenReveal: (() => void) | undefined
+  private refreshNativeMaterial: (() => void) | undefined
+  private flushWindowState: (() => void) | undefined
   private cleanupListeners: (() => void) | undefined
 
   constructor(private readonly options: ElectronShellGenerationOptions) {}
@@ -67,20 +81,132 @@ export class ElectronShellGeneration {
     }
     platform.configureApplication(icon, spec.productName, this.options.buildApplicationMenuItems())
     const origin = new URL(spec.url).origin
-    if (spec.mode === 'advanced') nativeTheme.themeSource = spec.readThemeSource()
-    const window = new BrowserWindow(desktopWindowOptions(spec, icon, platform.platform, this.options.preloadPath))
+    if (platform.platform !== 'linux') nativeTheme.themeSource = spec.readThemeSource()
+    let persistedBounds: MainWindowBounds | undefined
+    let restoredBounds: MainWindowBounds | undefined
+    try {
+      persistedBounds = this.options.mainWindowState.read()
+      if (persistedBounds !== undefined) {
+        const display = screen.getDisplayMatching(persistedBounds)
+        restoredBounds = fitMainWindowBounds(persistedBounds, display.workArea, {
+          width: spec.minWidth,
+          height: spec.minHeight,
+        })
+      }
+    } catch (cause) {
+      this.options.logError(`dsh-plugin-desktop: failed to restore main-window state: ${cause instanceof Error ? cause.message : String(cause)}`)
+    }
+    const window = new BrowserWindow({
+      ...desktopWindowOptions(spec, icon, platform.platform, this.options.preloadPath),
+      ...(restoredBounds ?? {}),
+    })
     window.accessibleTitle = spec.windowTitle
     platform.configureWindow(window)
+    const refreshNativeMaterial = (): void => {
+      if (platform.platform === 'win32' && spec.material === 'acrylic') {
+        try {
+          if (!setWindowsAcrylic(window, true, nativeTheme.shouldUseDarkColors)) {
+            this.options.logError('dsh-plugin-desktop: Windows rejected the acrylic backdrop request')
+          }
+        } catch (cause) {
+          this.options.logError(`dsh-plugin-desktop: failed to apply Windows acrylic backdrop: ${cause instanceof Error ? cause.message : String(cause)}`)
+        }
+        return
+      }
+      platform.refreshThemeMaterial(window, spec.material)
+    }
+    this.refreshNativeMaterial = refreshNativeMaterial
+    refreshNativeMaterial()
     this.window = window
+
+    let stateWriteTimer: ReturnType<typeof setTimeout> | undefined
+    const persistWindowState = (): void => {
+      if (stateWriteTimer !== undefined) {
+        clearTimeout(stateWriteTimer)
+        stateWriteTimer = undefined
+      }
+      if (window.isDestroyed()) return
+      const bounds = window.getNormalBounds()
+      if (persistedBounds !== undefined && sameMainWindowBounds(bounds, persistedBounds)) return
+      try {
+        this.options.mainWindowState.write(bounds)
+        persistedBounds = { ...bounds }
+      } catch (cause) {
+        this.options.logError(`dsh-plugin-desktop: failed to save main-window state: ${cause instanceof Error ? cause.message : String(cause)}`)
+      }
+    }
+    const scheduleWindowStateWrite = (): void => {
+      if (stateWriteTimer !== undefined) clearTimeout(stateWriteTimer)
+      stateWriteTimer = setTimeout(persistWindowState, WINDOW_STATE_WRITE_DELAY_MS)
+      stateWriteTimer.unref()
+    }
+    this.flushWindowState = persistWindowState
 
     const show = (): void => { this.show() }
     const activate = (): void => {
       if (applicationNeedsReveal(window, platform.platform)) this.show()
     }
     const clearAttention = (): void => { this.clearAttention() }
+    let fullscreenExitPending = false
+    let hideAfterFullscreenExit = false
+    let restoreAfterFullscreenExit = false
+    let restoreFullscreenOnShow = false
+    const finishFullscreenExit = (): void => {
+      if (!fullscreenExitPending) return
+      fullscreenExitPending = false
+      const shouldHide = hideAfterFullscreenExit
+      const shouldRestore = restoreAfterFullscreenExit
+      hideAfterFullscreenExit = false
+      restoreAfterFullscreenExit = false
+      if (window.isDestroyed()) return
+      if (shouldHide) {
+        window.hide()
+        return
+      }
+      if (shouldRestore) {
+        restoreFullscreenOnShow = false
+        window.setFullScreen(true)
+      }
+    }
+    const prepareFullscreenReveal = (): void => {
+      if (!restoreFullscreenOnShow || window.isDestroyed()) return
+      if (fullscreenExitPending) {
+        hideAfterFullscreenExit = false
+        restoreAfterFullscreenExit = true
+        return
+      }
+      if (window.isFullScreen()) {
+        restoreFullscreenOnShow = false
+        return
+      }
+      restoreFullscreenOnShow = false
+      window.setFullScreen(true)
+    }
+    const cleanupFullscreenTransition = (): void => {
+      if (fullscreenExitPending) window.off('leave-full-screen', finishFullscreenExit)
+      fullscreenExitPending = false
+      hideAfterFullscreenExit = false
+      restoreAfterFullscreenExit = false
+      restoreFullscreenOnShow = false
+    }
+    this.prepareFullscreenReveal = prepareFullscreenReveal
     const close = (event: Electron.Event): void => {
+      persistWindowState()
       if (this.options.isQuitting()) return
       event.preventDefault()
+      if (platform.platform === 'darwin' && fullscreenExitPending) {
+        hideAfterFullscreenExit = true
+        restoreAfterFullscreenExit = false
+        return
+      }
+      if (platform.platform === 'darwin' && window.isFullScreen()) {
+        fullscreenExitPending = true
+        hideAfterFullscreenExit = true
+        restoreFullscreenOnShow = true
+        window.once('leave-full-screen', finishFullscreenExit)
+        window.setFullScreen(false)
+        return
+      }
       window.hide()
     }
     const preserveBlankTitle = (event: Electron.Event): void => { event.preventDefault() }
@@ -144,6 +270,8 @@ export class ElectronShellGeneration {
     if (platform.platform === 'darwin') app.on('did-become-active', activate)
     window.on('close', close)
     window.on('focus', clearAttention)
+    window.on('move', scheduleWindowStateWrite)
+    window.on('resize', scheduleWindowStateWrite)
     window.on('page-title-updated', preserveBlankTitle)
     window.webContents.on('before-input-event', handleZoomShortcut)
     window.webContents.on('will-frame-navigate', navigate)
@@ -170,14 +298,21 @@ export class ElectronShellGeneration {
       if (platform.platform === 'darwin') app.off('did-become-active', activate)
       window.off('close', close)
       window.off('focus', clearAttention)
+      window.off('move', scheduleWindowStateWrite)
+      window.off('resize', scheduleWindowStateWrite)
       window.off('page-title-updated', preserveBlankTitle)
       window.off('ready-to-show', show)
+      cleanupFullscreenTransition()
       window.webContents.off('before-input-event', handleZoomShortcut)
       window.webContents.off('will-frame-navigate', navigate)
       window.webContents.off('will-redirect', redirect)
       window.webContents.off('render-process-gone', rendererGone)
       window.webContents.off('did-fail-load', loadFailed)
       tray?.off('click', show)
+      if (stateWriteTimer !== undefined) {
+        clearTimeout(stateWriteTimer)
+        stateWriteTimer = undefined
+      }
     }
 
     try {
@@ -201,6 +336,26 @@ export class ElectronShellGeneration {
     if (window === undefined || window.isDestroyed()) return
     this.clearAttention()
     revealApplication(window, this.options.platform.platform)
+    this.prepareFullscreenReveal?.()
+  }
+
+  /** Reload the active renderer without permitting arbitrary renderer commands. */
+  reloadRenderer(): void {
+    const window = this.window
+    if (window === undefined || window.isDestroyed()) {
+      throw new Error('dsh-plugin-desktop: renderer reload requires a mounted window')
+    }
+    window.webContents.reloadIgnoringCache()
+  }
+
+  /** Toggle Developer Tools for the active renderer. */
+  toggleDeveloperTools(): void {
+    const window = this.window
+    if (window === undefined || window.isDestroyed()) {
+      throw new Error('dsh-plugin-desktop: Developer Tools require a mounted window')
+    }
+    if (window.webContents.isDevToolsOpened()) window.webContents.closeDevTools()
+    else window.webContents.openDevTools({ mode: 'detach', activate: true })
   }
 
   notifyAttention(notification: DesktopNotification): void {
@@ -224,13 +379,27 @@ export class ElectronShellGeneration {
       : await dialog.showOpenDialog(window, options)
   }
 
+  async showMessageBox(options: Electron.MessageBoxOptions): Promise<Electron.MessageBoxReturnValue> {
+    const window = this.window
+    return window === undefined || window.isDestroyed()
+      ? await showDesktopMessageBox(options)
+      : await showDesktopMessageBox(options, window)
+  }
+
+  async showSaveDialog(options: Electron.SaveDialogOptions): Promise<Electron.SaveDialogReturnValue> {
+    const window = this.window
+    return window === undefined || window.isDestroyed()
+      ? await dialog.showSaveDialog(options)
+      : await dialog.showSaveDialog(window, options)
+  }
+
   refreshTrayMenu(): void {
     if (this.tray === undefined) return
     this.tray.setContextMenu(Menu.buildFromTemplate(this.options.buildTrayTemplate()))
   }
 
   refreshThemeMaterial(): void {
-    if (this.window !== undefined && !this.window.isDestroyed()) this.options.platform.refreshThemeMaterial(this.window)
+    if (this.window !== undefined && !this.window.isDestroyed()) this.refreshNativeMaterial?.()
   }
 
   async release(): Promise<void> {
@@ -241,8 +410,12 @@ export class ElectronShellGeneration {
     const window = this.window
     const tray = this.tray
     this.clearAttention()
+    this.flushWindowState?.()
     this.window = undefined
     this.tray = undefined
+    this.prepareFullscreenReveal = undefined
+    this.refreshNativeMaterial = undefined
+    this.flushWindowState = undefined
     if (window === undefined) return
 
     this.cleanupListeners?.()

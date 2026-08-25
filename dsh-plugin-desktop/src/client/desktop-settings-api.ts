@@ -6,6 +6,12 @@ const PROFILE_SELECT_PATH = '/api/desktop/profiles/select'
 const PROFILE_DELETE_PATH = '/api/desktop/profiles/delete'
 const MARKET_SELECT_PATH = '/api/desktop/market/select'
 const TERMINAL_OPEN_PATH = '/api/desktop/terminal/open'
+const RESTART_PATH = '/api/desktop/restart'
+const RECOVERY_RESTART_PATH = '/api/desktop/restart/recovery'
+const RENDERER_RELOAD_PATH = '/api/desktop/developer/reload'
+const DEVELOPER_TOOLS_TOGGLE_PATH = '/api/desktop/developer/devtools'
+const UPDATE_CHECK_PATH = '/api/desktop/updates/check'
+const DIAGNOSTICS_EXPORT_PATH = '/api/desktop/diagnostics/export'
 const MAX_PROFILES = 256
 const MAX_PROFILE_NAME_LENGTH = 255
 
@@ -49,6 +55,12 @@ export interface DesktopSettingsApi {
   deleteProfile(name: string): Promise<DesktopSettingsView>
   selectMarket(provider: DesktopMarketProvider): Promise<DesktopRestartAcceptance>
   openTerminal(): Promise<void>
+  restart(): Promise<void>
+  restartToRecovery(): Promise<void>
+  reloadRenderer(): Promise<void>
+  toggleDeveloperTools(): Promise<void>
+  checkForUpdates(): Promise<void>
+  exportDiagnostics(): Promise<void>
 }
 
 type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
@@ -179,6 +191,24 @@ export function createDesktopSettingsApi(fetcher: FetchLike = globalThis.fetch.b
     async openTerminal() {
       parseDesktopActionAcceptance(await readResponse(await post(fetcher, TERMINAL_OPEN_PATH, {})))
     },
+    async restart() {
+      parseDesktopActionAcceptance(await readResponse(await post(fetcher, RESTART_PATH, {})))
+    },
+    async restartToRecovery() {
+      parseDesktopActionAcceptance(await readResponse(await post(fetcher, RECOVERY_RESTART_PATH, {})))
+    },
+    async reloadRenderer() {
+      parseDesktopActionAcceptance(await readResponse(await post(fetcher, RENDERER_RELOAD_PATH, {})))
+    },
+    async toggleDeveloperTools() {
+      parseDesktopActionAcceptance(await readResponse(await post(fetcher, DEVELOPER_TOOLS_TOGGLE_PATH, {})))
+    },
+    async checkForUpdates() {
+      parseDesktopActionAcceptance(await readResponse(await post(fetcher, UPDATE_CHECK_PATH, {})))
+    },
+    async exportDiagnostics() {
+      parseDesktopActionAcceptance(await readResponse(await post(fetcher, DIAGNOSTICS_EXPORT_PATH, {})))
+    },
   })
 }
 
@@ -189,4 +219,10 @@ export const desktopSettingsPaths = Object.freeze({
   profileDelete: PROFILE_DELETE_PATH,
   marketSelect: MARKET_SELECT_PATH,
   terminalOpen: TERMINAL_OPEN_PATH,
+  restart: RESTART_PATH,
+  recoveryRestart: RECOVERY_RESTART_PATH,
+  rendererReload: RENDERER_RELOAD_PATH,
+  developerToolsToggle: DEVELOPER_TOOLS_TOGGLE_PATH,
+  updateCheck: UPDATE_CHECK_PATH,
+  diagnosticsExport: DIAGNOSTICS_EXPORT_PATH,
 })
