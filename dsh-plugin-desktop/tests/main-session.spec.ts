@@ -33,6 +33,7 @@ function deps(overrides: Partial<MainSessionDeps> = {}): MainSessionDeps {
   return {
     ensureAgent: async () => fakeHandle(fakeAgent(MAIN_SESSION_ID)),
     getAgent: () => undefined,
+    resumeSession: async () => false,
     listLiveAgents: () => [],
     listWorkspaceSessionIds: () => [],
     workspaceOf: () => undefined,
@@ -103,14 +104,28 @@ describe('MainSessionService', () => {
     expect(result.ungrouped[0]!).toMatchObject({ sessionId: 'adhoc-1', live: true })
   })
 
-  it('sendMessage fails when the target has no live agent', () => {
-    const service = new MainSessionService(deps({ getAgent: () => undefined }))
-    const result = service.sendMessage('missing', 'hello')
+  it('sendMessage fails when the target has no live agent and cannot be resumed', async () => {
+    const service = new MainSessionService(deps({ getAgent: () => undefined, resumeSession: async () => false }))
+    const result = await service.sendMessage('missing', 'hello')
     expect(result.success).toBe(false)
     expect(result.error).toContain('no live agent')
   })
 
-  it('sendMessage injects via followup when the target is live', () => {
+  it('sendMessage resumes then injects when the target is not live but resumable', async () => {
+    const followup = vi.fn()
+    const agent = { id: 'ws-1', followup } as unknown as Agent
+    let live = false
+    const service = new MainSessionService(deps({
+      getAgent: (id) => id === 'ws-1' && live ? agent : undefined,
+      resumeSession: async () => { live = true; return true },
+    }))
+
+    const result = await service.sendMessage('ws-1', '请完成任务')
+    expect(result.success).toBe(true)
+    expect(followup).toHaveBeenCalledTimes(1)
+  })
+
+  it('sendMessage injects via followup when the target is live', async () => {
     const followup = vi.fn()
     const agent = {
       id: 'ws-1',
@@ -118,7 +133,7 @@ describe('MainSessionService', () => {
     } as unknown as Agent
     const service = new MainSessionService(deps({ getAgent: (id) => id === 'ws-1' ? agent : undefined }))
 
-    const result = service.sendMessage('ws-1', '请完成任务')
+    const result = await service.sendMessage('ws-1', '请完成任务')
     expect(result.success).toBe(true)
     expect(followup).toHaveBeenCalledTimes(1)
     const message = followup.mock.calls[0]![0] as { content: Array<{ type: string; text: string }>; source: { kind: string; plugin: string } }

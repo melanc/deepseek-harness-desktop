@@ -55,6 +55,8 @@ export interface MainSessionDeps {
   ensureAgent(): Promise<AgentHandle>
   /** Resolve a live agent by session id. */
   getAgent(sessionId: string): Agent | undefined
+  /** Resume a persisted session into a live agent (best-effort; false when it cannot be resumed). */
+  resumeSession(sessionId: string): Promise<boolean>
   /** List all live agents (excluding none; the service filters the main id). */
   listLiveAgents(): Agent[]
   /** Enumerate workspace-attached session ids (workspace registry). */
@@ -205,12 +207,22 @@ export class MainSessionService {
    * next-turn input with a plugin source so the transcript attributes it
    * to the main session.
    */
-  sendMessage(sessionId: string, message: string): SendMessageResult {
-    const agent = this.deps.getAgent(sessionId)
+  async sendMessage(sessionId: string, message: string): Promise<SendMessageResult> {
+    let agent = this.deps.getAgent(sessionId)
     if (agent === undefined) {
-      return {
-        success: false,
-        error: `Session ${sessionId} has no live agent (is it open in a workspace?)`,
+      const resumed = await this.deps.resumeSession(sessionId)
+      if (!resumed) {
+        return {
+          success: false,
+          error: `Session ${sessionId} has no live agent and could not be resumed`,
+        }
+      }
+      agent = this.deps.getAgent(sessionId)
+      if (agent === undefined) {
+        return {
+          success: false,
+          error: `Session ${sessionId} has no live agent after resume`,
+        }
       }
     }
     try {
