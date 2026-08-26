@@ -1,6 +1,6 @@
 /** Official Settings Slot registration for Desktop-owned preferences. */
 
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type { ClientContext, SettingsScope } from '@deepseek-ai/dsh-client-runtime/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import { DesktopSettingsSection, type DesktopNotificationSettings, type DesktopShellSettings } from './DesktopSettingsSection.tsx'
@@ -23,6 +23,29 @@ export interface DesktopSettingsClientControl {
   setMode(mode: DesktopShellSettings['mode']): Promise<void>
 }
 
+/**
+ * Persist a native mode choice without leaving browser access in a mode the
+ * marker-free client cannot render. Custom modes withdraw browser and LAN
+ * access in ordered writes; the Host compares only effective generation state.
+ */
+export async function persistDesktopModeSelection(
+  desktopSettings: Pick<SettingsScope<DesktopShellSettings>, 'set'>,
+  mode: DesktopShellSettings['mode'],
+): Promise<void> {
+  if (mode === 'compatibility') {
+    await desktopSettings.set('mode', mode)
+    return
+  }
+  // The titlebar is interactive before the settings mirror necessarily reaches
+  // ready. Always withdraw both browser capabilities for a custom mode instead
+  // of treating an unavailable or stale snapshot as browser access being off.
+  // Withdraw the listener first so every intermediate persisted state remains
+  // valid while compatibility mode is still selected.
+  await desktopSettings.set('networkExposure', 'loopback')
+  await desktopSettings.set('openBrowser', false)
+  await desktopSettings.set('mode', mode)
+}
+
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
     /** Desktop-only settings page copy. */
@@ -43,6 +66,9 @@ export function applyDesktopSettings(
   })
   const api = createDesktopSettingsApi()
   const t = ctx.locale.bind(DESKTOP_SETTINGS_LOCALE_NAMESPACE)
+  const setMode = async (mode: DesktopShellSettings['mode']): Promise<void> => {
+    await persistDesktopModeSelection(desktopSettings, mode)
+  }
 
   ctx.effect(
     () => ctx.locale.register(DESKTOP_SETTINGS_LOCALE_NAMESPACE, { zh, en }),
@@ -63,6 +89,7 @@ export function applyDesktopSettings(
       platform: environment.platform,
       initialMode: environment.mode,
       micaSupported: environment.micaSupported,
+      setMode,
       desktopSettings,
       notificationSettings,
     }),
@@ -77,8 +104,6 @@ export function applyDesktopSettings(
 
   return Object.freeze({
     api,
-    async setMode(mode: DesktopShellSettings['mode']) {
-      await desktopSettings.set('mode', mode)
-    },
+    setMode,
   })
 }

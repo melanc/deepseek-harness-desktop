@@ -29,6 +29,14 @@ import { parseDocument } from 'yaml'
 import { unpackedAsarPath } from './packaged-runtime-path.ts'
 import { findOverlayPackage, resolveOverlayPackage } from './package-overlay.ts'
 import { DESKTOP_DEFAULT_WEB_PORT } from './desktop-port.ts'
+import {
+  desktopBrowserAccessEnabled,
+  desktopNetworkExposureForBrowserAccess,
+  desktopWebServerHost,
+  parseDesktopNetworkExposure,
+  parseDesktopOpenBrowser,
+  type DesktopNetworkExposure,
+} from './desktop-network.ts'
 import type { DesktopShellMode } from './runtime.ts'
 import {
   DEFAULT_MACOS_WINDOW_MATERIAL,
@@ -124,6 +132,9 @@ export interface DesktopStartupSettings {
   port: number
   macosMaterial: MacosWindowMaterial
   windowsMaterial: WindowsWindowMaterial
+  /** Persisted compatibility key for ordinary-browser access permission. */
+  openBrowser: boolean
+  networkExposure: DesktopNetworkExposure
 }
 
 const DEFAULT_DESKTOP_STARTUP_SETTINGS: DesktopStartupSettings = Object.freeze({
@@ -131,6 +142,8 @@ const DEFAULT_DESKTOP_STARTUP_SETTINGS: DesktopStartupSettings = Object.freeze({
   port: DEFAULT_DESKTOP_PORT,
   macosMaterial: DEFAULT_MACOS_WINDOW_MATERIAL,
   windowsMaterial: DEFAULT_WINDOWS_WINDOW_MATERIAL,
+  openBrowser: false,
+  networkExposure: 'loopback',
 })
 
 /**
@@ -150,11 +163,20 @@ export function desktopStartupSettingsFromSettings(document: unknown): DesktopSt
     throw new Error(`${BIN_NAME}: ${DESKTOP_SETTINGS_NAMESPACE} settings must be a map`)
   }
   const values = section as Record<string, unknown>
+  const mode = parseDesktopShellMode(values.mode)
+  const networkExposure = parseDesktopNetworkExposure(values.networkExposure)
+  const openBrowser = desktopBrowserAccessEnabled(
+    mode,
+    parseDesktopOpenBrowser(values.openBrowser),
+    networkExposure,
+  )
   return {
-    mode: parseDesktopShellMode(values.mode),
+    mode,
     port: parseDesktopPort(values.port),
     macosMaterial: parseMacosWindowMaterial(values.macosMaterial),
     windowsMaterial: parseWindowsWindowMaterial(values.windowsMaterial),
+    openBrowser,
+    networkExposure: desktopNetworkExposureForBrowserAccess(openBrowser, networkExposure),
   }
 }
 
@@ -226,8 +248,12 @@ export interface PreparedDesktopProfile {
   macosMaterial: MacosWindowMaterial
   /** Native backdrop preference retained for Windows generations. */
   windowsMaterial: WindowsWindowMaterial
-  /** Persisted loopback Web port applied to every startup consumer. */
+  /** Persisted Web port applied to every startup consumer. */
   port: number
+  /** Whether Desktop advertises the marker-free compatibility client for browser use. */
+  openBrowser: boolean
+  /** Listener scope applied to the Desktop-owned WebServer. */
+  networkExposure: DesktopNetworkExposure
   /** Resolved file-backed settings document used by this generation. */
   settingsDocument: string
   /** Requested provider and the fail-closed provider effective for this generation. */
@@ -702,7 +728,6 @@ export function prepareDesktopProfile(
   profileName: string = DESKTOP_PROFILE_NAME,
   pluginStatePath?: string,
   marketSelection: DesktopMarketSnapshot = DEFAULT_DESKTOP_MARKET_SNAPSHOT,
-  recoveryStatePath?: string,
   hooks: DesktopProfilePreparationHooks = {},
 ): PreparedDesktopProfile {
   const profileDir = profileName === DESKTOP_PROFILE_NAME
@@ -711,24 +736,15 @@ export function prepareDesktopProfile(
   const workspaceChanged = reconcileProfilePnpmWorkspace(profileDir)
   const requiresDependencyMigration = profileDependencyMigrationRequired(profileDir, workspaceChanged, platform)
   healProfilesModuleFallback(INSTALL_ANCHOR, home)
-  // `plugin-management` is the community market's user-facing scope. Startup
-  // recovery has its own state file so switching to another provider cannot
-  // reapply a stale community-market disable, while a recovery disable always
-  // remains effective regardless of the selected provider. Keep the legacy
-  // five-argument call compatible for tests/older embedders.
+  // `plugin-management` remains the community market's user-facing scope.
+  // Recovery mode no longer reads or writes an independent disable policy:
+  // package removal goes through the provider-neutral `dsh plugin remove`.
   const managedDisabledBundles = pluginStatePath === undefined
     ? new Set<string>()
     : readDesktopDisabledBundles(pluginStatePath, profileName)
-  const recoveryDisabledBundles = recoveryStatePath === undefined
-    ? (marketSelection.requested === DESKTOP_MARKET_IDENTITIES.community.provider
-      ? new Set<string>()
-      : new Set(managedDisabledBundles))
-    : readDesktopDisabledBundles(recoveryStatePath, profileName)
-  const disabledBundles = new Set(recoveryDisabledBundles)
-  if (recoveryStatePath === undefined
-    || marketSelection.requested === DESKTOP_MARKET_IDENTITIES.community.provider) {
-    for (const packageName of managedDisabledBundles) disabledBundles.add(packageName)
-  }
+  const disabledBundles = marketSelection.requested === DESKTOP_MARKET_IDENTITIES.community.provider
+    ? new Set(managedDisabledBundles)
+    : new Set<string>()
   const loadedProfile = loadRecoveryFilteredProfile(
     profileName,
     profileDir,
@@ -830,10 +846,30 @@ export function prepareDesktopProfile(
   } as SettingsFileConfig)
   const settingsDocument = resolveSettingsFileSpec(settingsConfig).filename
   hooks.onSettingsDocumentResolved?.(settingsDocument)
-  const { mode, port, macosMaterial, windowsMaterial } = readDesktopStartupSettings(settingsConfig)
+  const {
+    mode,
+    port,
+    macosMaterial,
+    windowsMaterial,
+    openBrowser,
+    networkExposure,
+  } = readDesktopStartupSettings(settingsConfig)
   patches.push({
     id: 'settings',
     config: settingsConfig,
+  })
+  const webRuntime = rows.get('web-runtime')
+  if (webRuntime === undefined) {
+    throw new Error(`${BIN_NAME}: desktop profile has no web-runtime row`)
+  }
+  patches.push({
+    id: 'web-runtime',
+    config: {
+      ...rowConfig(webRuntime),
+      // Browser access is an advertised Desktop capability, never an
+      // instruction to launch the operating system's default browser.
+      openBrowser: false,
+    },
   })
   if (mode === 'advanced' || mode === 'extended') {
     for (const [id, packageName] of [
@@ -929,8 +965,7 @@ export function prepareDesktopProfile(
   }
   // Loader patches cannot change an existing row's package identity. Disable the
   // profile row by its current identity and insert the Desktop-owned provider.
-  // Loopback-only binding is a launcher security invariant, not user config.
-  const webserverConfig = { host: '127.0.0.1', port }
+  const webserverConfig = { host: desktopWebServerHost(networkExposure), port }
   if (webserver.name === DESKTOP_WEB_SERVER_PACKAGE) {
     patches.push({
       id: 'webserver',
@@ -982,6 +1017,7 @@ export function prepareDesktopProfile(
       ...rowConfig(desktopShell),
       mode,
       port,
+      networkExposure,
       macosMaterial,
       windowsMaterial,
     },
@@ -997,6 +1033,8 @@ export function prepareDesktopProfile(
     port,
     macosMaterial,
     windowsMaterial,
+    openBrowser,
+    networkExposure,
     settingsDocument,
     market: desktopMarketSnapshotWithEffective(marketSelection, effectiveMarket),
     requiresDependencyMigration,

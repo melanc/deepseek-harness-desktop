@@ -4,6 +4,7 @@ import type { DesktopShellSpec } from '../src/runtime.ts'
 import {
   advancedWindowOptions,
   compatibilityWindowOptions,
+  DESKTOP_RENDERER_SESSION_PARTITION,
   desktopWindowOptions,
   extendedWindowOptions,
 } from '../src/window-options.ts'
@@ -24,6 +25,10 @@ const spec: DesktopShellSpec = {
   minWidth: 900,
   minHeight: 640,
   url: 'http://127.0.0.1:43120/',
+  rendererAccessHeader: {
+    name: 'x-dsh-desktop-renderer',
+    value: Buffer.alloc(32, 8).toString('base64url'),
+  },
   productName: 'DSH Desktop',
   windowTitle: 'DeepSeek Harness Desktop',
   iconPath: '/tmp/app-icon.png',
@@ -51,6 +56,7 @@ describe('compatibility BrowserWindow options', () => {
       minWidth: 900,
       minHeight: 640,
       show: false,
+      backgroundColor: '#202124',
       icon,
       titleBarStyle: 'hiddenInset',
       trafficLightPosition: { x: 16, y: DESKTOP_FRAME_MACOS_TRAFFIC_LIGHT_TOP },
@@ -60,6 +66,7 @@ describe('compatibility BrowserWindow options', () => {
         nodeIntegration: false,
         sandbox: true,
         webSecurity: true,
+        partition: DESKTOP_RENDERER_SESSION_PARTITION,
       },
     }))
     expect(options).not.toHaveProperty('titleBarOverlay')
@@ -70,6 +77,7 @@ describe('compatibility BrowserWindow options', () => {
     const options = compatibilityWindowOptions(spec, {} as NativeImage, 'win32', preload)
 
     expect(options.title).toBe('DeepSeek Harness Desktop')
+    expect(options.backgroundColor).toBe('#202124')
     expect(options.autoHideMenuBar).toBe(true)
     expect(options.titleBarStyle).toBe('hidden')
     expect(options.titleBarOverlay).toEqual(expect.objectContaining({ height: DESKTOP_FRAME_HEIGHT }))
@@ -125,7 +133,7 @@ describe('compatibility BrowserWindow options', () => {
 
   it('uses native Windows controls, Mica, shadow, and rounded corners in enhanced mode', () => {
     const options = advancedWindowOptions(
-      { ...spec, mode: 'advanced', material: 'mica' },
+      { ...spec, mode: 'advanced', material: 'mica', windowsBuild: 22_621 },
       {} as NativeImage,
       'win32',
       preload,
@@ -143,6 +151,40 @@ describe('compatibility BrowserWindow options', () => {
       roundedCorners: true,
       thickFrame: true,
     }))
+  })
+
+  it('uses the Windows 11 system Acrylic backdrop without transparent-window layering', () => {
+    const options = advancedWindowOptions(
+      { ...spec, mode: 'advanced', material: 'acrylic', windowsBuild: 22_621 },
+      {} as NativeImage,
+      'win32',
+      preload,
+    )
+
+    expect(options).toEqual(expect.objectContaining({
+      backgroundColor: '#00000000',
+      backgroundMaterial: 'acrylic',
+      roundedCorners: true,
+      thickFrame: true,
+    }))
+    expect(options).not.toHaveProperty('transparent')
+  })
+
+  it('keeps a Windows 11 21H2 window opaque when an unevaluated Acrylic spec reaches construction', () => {
+    const options = advancedWindowOptions(
+      { ...spec, mode: 'advanced', material: 'acrylic', windowsBuild: 22_000 },
+      {} as NativeImage,
+      'win32',
+      preload,
+    )
+
+    expect(options).toEqual(expect.objectContaining({
+      backgroundColor: '#202124',
+      roundedCorners: true,
+      thickFrame: true,
+    }))
+    expect(options).not.toHaveProperty('transparent')
+    expect(options).not.toHaveProperty('backgroundMaterial')
   })
 
   it('uses the taller native caption and capability-gated material in extended mode', () => {
