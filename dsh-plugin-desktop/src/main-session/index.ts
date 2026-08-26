@@ -192,7 +192,11 @@ export class MainSessionServiceHost extends Service implements MainSessionServic
 export function apply(ctx: Context): void {
   const agents = ctx.get('agents') as unknown as AgentsRegistry
   const sessions = ctx.get('sessions') as unknown as SessionsStore
-  const sessionQuery = ctx.get('sessionQuery') as unknown as SessionQueryEngine | undefined
+  // The session-query service is resolved lazily (like session-title and the
+  // workspace registry): it may not be published when apply runs, so titleOf
+  // must observe the live service on each read.
+  const resolveSessionQuery = (): SessionQueryEngine | undefined =>
+    ctx.get('sessionQuery') as unknown as SessionQueryEngine | undefined
   // The session-title service is resolved lazily (like the workspace registry):
   // it may not be published when apply runs, and rename must observe the live
   // service. Absent → rename reports `unavailable`.
@@ -403,6 +407,7 @@ export function apply(ctx: Context): void {
       return undefined
     },
     titleOf: async (id) => {
+      const sessionQuery = resolveSessionQuery()
       if (sessionQuery === undefined) {
         ctx.logger.warn(`dsh-plugin-desktop: titleOf(${id}) skipped: sessionQuery unavailable`)
         return undefined
