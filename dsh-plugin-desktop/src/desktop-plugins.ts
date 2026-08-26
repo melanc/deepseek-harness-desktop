@@ -649,10 +649,18 @@ export class DesktopPluginsService extends Service implements DesktopPlugins {
 
   list(): readonly DesktopPluginBundle[] {
     this.assertActive()
-    return readDesktopProfileBundleInventory(this.bootstrap).map(item => ({
-      ...item,
-      bundleId: this.bundleId(item.packageName),
-    }))
+    try {
+      return readDesktopProfileBundleInventory(this.bootstrap).map(item => ({
+        ...item,
+        bundleId: this.bundleId(item.packageName),
+      }))
+    } catch (cause) {
+      const detail = cause instanceof Error
+        ? `${cause.message}${cause.stack === undefined ? '' : `\n${cause.stack}`}`
+        : String(cause)
+      this.ctx.logger.error(`dsh-plugin-desktop: desktopPlugins.list() failed: ${detail}`)
+      throw cause
+    }
   }
 
   isDisabled(packageName: string): boolean {

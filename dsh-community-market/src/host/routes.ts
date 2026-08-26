@@ -521,10 +521,18 @@ function reconcileInstallations(
   value: readonly MarketDesktopPluginBundle[],
 ): readonly MarketInstallationView[] {
   if (!Array.isArray(value) || value.length > 4_096 || !value.every(validDesktopBundle)) {
+    console.error(
+      `dsh-community-market: reconcileInstallations rejected desktop plugin inventory:`,
+      value,
+    )
     throw new MarketInstallError('operation-failed', 'The desktop plugin inventory was invalid.')
   }
   const ids = new Set(value.map(bundle => bundle.bundleId))
   if (ids.size !== value.length) {
+    console.error(
+      'dsh-community-market: reconcileInstallations rejected duplicate bundleId:',
+      value.map(bundle => bundle.bundleId),
+    )
     throw new MarketInstallError('operation-failed', 'The desktop plugin inventory was invalid.')
   }
   return value.map(bundle => ({
@@ -1078,6 +1086,10 @@ export function registerMarketRoutes(
           const installations = reconcileInstallations(desktopPlugins.list())
           if (!generationController.signal.aborted && !res.destroyed) sendJson(res, 200, { installations })
         } catch (cause) {
+          const detail = cause instanceof Error
+            ? `${cause.message}${cause.stack === undefined ? '' : `\n${cause.stack}`}`
+            : String(cause)
+          ctx.logger.error(`dsh-community-market: GET ${ROUTE_INSTALLATIONS} failed: ${detail}`)
           if (!generationController.signal.aborted && !res.destroyed) sendInstallError(res, cause)
         }
       }}),
