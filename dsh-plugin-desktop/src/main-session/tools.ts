@@ -37,9 +37,10 @@ export function registerMainSessionTools(
     defineTool({
       name: 'workspace_list_sessions',
       description:
-        'List all workspace sessions and ungrouped live sessions, with titles and ' +
-        'whether each has a live agent. Use this to determine which workspace ' +
-        'session is handling a given task before sending it a message.',
+        'List all workspace sessions and ungrouped live sessions, with each session\'s ' +
+        'cwd (working directory), title, workspace name, and whether it has a live agent. ' +
+        'Use this to determine which workspace session is handling a given task before ' +
+        'sending it a message: match by cwd first (most precise), then by title/workspace name.',
       parameters: {},
       output: {
         schema: {

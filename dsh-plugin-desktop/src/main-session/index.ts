@@ -77,7 +77,7 @@ interface AgentDefaultModelService {
 }
 
 interface SessionsStore {
-  get(sessionId: unknown): { header: { createdAt: number } } | undefined
+  get(sessionId: unknown): { header: { createdAt: number; cwd?: string } } | undefined
 }
 
 interface WorkspaceRegistry {
@@ -409,6 +409,7 @@ export function apply(ctx: Context): void {
       }
     },
     lastActiveOf: (id) => sessions.get(sessionIdOf(id))?.header.createdAt,
+    cwdOf: (id) => sessions.get(sessionIdOf(id))?.header.cwd,
     messageCountOf: (id) => {
       const session = sessions.get(sessionIdOf(id)) as
         | { deriveMessages(): unknown[] }

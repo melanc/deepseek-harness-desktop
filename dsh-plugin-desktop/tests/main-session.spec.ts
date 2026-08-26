@@ -37,6 +37,7 @@ function deps(overrides: Partial<MainSessionDeps> = {}): MainSessionDeps {
     listWorkspaceSessionIds: () => [],
     workspaceOf: () => undefined,
     titleOf: async () => undefined,
+    cwdOf: () => undefined,
     lastActiveOf: () => undefined,
     messageCountOf: () => 0,
     createWorkspaceSession: async (options) => ({
@@ -60,6 +61,7 @@ describe('MainSessionService', () => {
         ? { id: 'ws-1', name: '项目 A' }
         : { id: 'ws-2', name: '项目 B' },
       titleOf: async (id) => id === 'ws-1' ? '重构模块' : undefined,
+      cwdOf: (id) => id === 'ws-1' ? '/Users/tal/go/src/dev_repos/deepseek-harness-desktop' : undefined,
       lastActiveOf: (id) => id === 'ws-1' ? 1000 : undefined,
       messageCountOf: () => 5,
       getAgent: (id) => id === 'ws-1' ? fakeAgent('ws-1') : undefined,
@@ -71,6 +73,7 @@ describe('MainSessionService', () => {
     expect(result.sessions[0]!).toMatchObject({
       sessionId: 'ws-1',
       workspaceName: '项目 A',
+      cwd: '/Users/tal/go/src/dev_repos/deepseek-harness-desktop',
       title: '重构模块',
       live: true,
       lastActiveAt: 1000,
@@ -81,6 +84,7 @@ describe('MainSessionService', () => {
       live: false,
     })
     expect('title' in result.sessions[1]!).toBe(false)
+    expect('cwd' in result.sessions[1]!).toBe(false)
     // main-session is excluded from ungrouped.
     expect(result.ungrouped).toHaveLength(0)
   })
