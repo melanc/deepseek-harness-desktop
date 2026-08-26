@@ -344,6 +344,28 @@ export function apply(ctx: Context): void {
   const innerService = new MainSessionService({
     ensureAgent: ensureMainAgent,
     getAgent: (id) => agents.get(sessionIdOf(id)),
+    resumeSession: async (id) => {
+      const sessionId = sessionIdOf(id)
+      try {
+        const selection = createMainSelection(ctx)
+        const selected = selection.current
+        const agentOptions = selected === undefined ? {} : { ...selected }
+        await agents.resume({
+          resumeSessionId: sessionId,
+          agentOptions,
+          setup: async (agentCtx: Context) => {
+            installModelSelection(agentCtx, selection)
+            await joinDefaultAgentPreset(ctx, agentCtx)
+          },
+        })
+        return true
+      } catch (err) {
+        ctx.logger.warn(
+          `dsh-plugin-desktop: resumeSession(${id}) failed: ${err instanceof Error ? err.message : String(err)}`,
+        )
+        return false
+      }
+    },
     listLiveAgents: () => agents.list(),
     recordActivityStart: (sessionId, task, workspace) => {
       void activityStore.recordStart(sessionId, task, workspace)
@@ -381,11 +403,19 @@ export function apply(ctx: Context): void {
       return undefined
     },
     titleOf: async (id) => {
-      if (sessionQuery === undefined) return undefined
+      if (sessionQuery === undefined) {
+        ctx.logger.warn(`dsh-plugin-desktop: titleOf(${id}) skipped: sessionQuery unavailable`)
+        return undefined
+      }
       try {
         const snapshot = await sessionQuery.readTitle(sessionIdOf(id))
+        if (snapshot === undefined) {
+          ctx.logger.info(`dsh-plugin-desktop: titleOf(${id}): no title snapshot`)
+        }
         return snapshot?.title
-      } catch {
+      } catch (cause) {
+        const detail = cause instanceof Error ? `${cause.message}\n${cause.stack ?? ''}` : String(cause)
+        ctx.logger.error(`dsh-plugin-desktop: titleOf(${id}) failed: ${detail}`)
         return undefined
       }
     },
