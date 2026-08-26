@@ -440,32 +440,35 @@ export function apply(ctx: Context): void {
       }
 
       // 0.5 Guard against duplicate workspace creation. The host registry
-      // matches workspaces by exact canonical path; passing a sub-directory
-      // of an existing workspace (e.g. .../kt_repos/watcher when kt_repos
-      // already exists at .../kt_repos) would silently register a second
-      // workspace, and same-titled workspaces are easy to create by accident.
-      // When either is detected, refuse to create and report the existing
-      // workspace so the caller can reuse it.
+      // matches workspaces by exact canonical path and its create() is already
+      // idempotent for an exact match, so an exact match is fine to reuse.
+      // What must be blocked: (a) a sub-directory of an existing workspace
+      // (e.g. .../kt_repos/watcher when kt_repos owns .../kt_repos), which
+      // would silently register a second workspace; (b) a brand-new path whose
+      // title collides with an existing workspace.
       if (options.workspacePath !== undefined) {
-        const exact = workspaceRegistry.resolveByPath === undefined
-          ? undefined
-          : await workspaceRegistry.resolveByPath(options.workspacePath)
-        if (exact !== undefined) {
-          return {
-            sessionId: '',
-            error: `workspace path "${options.workspacePath}" is already owned by existing workspace "${exact.title}" (${exact.id}); reuse it instead of creating a duplicate`,
-          }
-        }
         const existing = workspaceRegistry.list()
-        const parent = existing.find(w => w.path !== undefined && isPathWithinOrEqual(options.workspacePath!, w.path!))
-        if (parent !== undefined) {
-          return {
-            sessionId: '',
-            error: `workspace path "${options.workspacePath}" is inside existing workspace "${parent.title}" (${parent.id}); reuse it instead of creating a sub-directory workspace`,
+        const exact = existing.find(w => w.path !== undefined && w.path === options.workspacePath)
+        // Exact path match → reuse via create()'s idempotency; no guard needed.
+        if (exact === undefined) {
+          const parent = existing.find(w => w.path !== undefined && isPathWithinOrEqual(options.workspacePath!, w.path!))
+          if (parent !== undefined) {
+            return {
+              sessionId: '',
+              error: `workspace path "${options.workspacePath}" is inside existing workspace "${parent.title}" (${parent.id}); reuse it instead of creating a sub-directory workspace`,
+            }
+          }
+          if (options.workspaceTitle !== undefined) {
+            const byTitle = existing.find(w => w.title === options.workspaceTitle)
+            if (byTitle !== undefined) {
+              return {
+                sessionId: '',
+                error: `a workspace titled "${options.workspaceTitle}" already exists (${byTitle.id}); pass its workspacePath to reuse it, or use a different title`,
+              }
+            }
           }
         }
-      }
-      if (options.workspaceTitle !== undefined) {
+      } else if (options.workspaceTitle !== undefined) {
         const byTitle = workspaceRegistry.list().find(w => w.title === options.workspaceTitle)
         if (byTitle !== undefined) {
           return {
