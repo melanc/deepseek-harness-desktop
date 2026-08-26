@@ -125,6 +125,8 @@ export interface WorkspaceSessionView {
   readonly workspaceId?: string
   /** Workspace title (from the workspace registry) when available. */
   readonly workspaceName?: string
+  /** Session working directory (from the session header), the precise identity signal for dispatch. */
+  readonly cwd?: string
   /** Session title (from the session-query title provider). */
   readonly title?: string
   /** Whether a live agent is currently registered for this session. */

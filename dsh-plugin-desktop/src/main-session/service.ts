@@ -63,6 +63,8 @@ export interface MainSessionDeps {
   workspaceOf(sessionId: string): { id: string; name: string } | undefined
   /** Resolve a session title. */
   titleOf(sessionId: string): Promise<string | undefined>
+  /** Read the session working directory from its header. */
+  cwdOf(sessionId: string): string | undefined
   /** Read the last activity time for a session. */
   lastActiveOf(sessionId: string): number | undefined
   /** Count surface messages for a session (activity heuristic). */
@@ -179,11 +181,13 @@ export class MainSessionService {
   /** Build one session view. */
   private async viewOf(sessionId: string, live: boolean): Promise<WorkspaceSessionView> {
     const ws = this.deps.workspaceOf(sessionId)
+    const cwd = this.deps.cwdOf(sessionId)
     const title = await this.deps.titleOf(sessionId).catch(() => undefined)
     const lastActiveAt = this.deps.lastActiveOf(sessionId)
     return {
       sessionId,
       ...ws === undefined ? {} : { workspaceId: ws.id, workspaceName: ws.name },
+      ...cwd === undefined ? {} : { cwd },
       ...title === undefined ? {} : { title },
       live,
       ...lastActiveAt === undefined ? {} : { lastActiveAt },
