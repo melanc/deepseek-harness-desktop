@@ -579,10 +579,7 @@ export class MarketInstallService {
         if (installedVersion !== verification.version) throw new Error('installed version mismatch')
         operationSignal.throwIfAborted()
       } catch {
-        throw new MarketInstallError(
-          'operation-failed',
-          'The package manager changed the Profile, but the plugin bundle could not be validated. Use a Recovery checkpoint if you need to restore the previous Profile state.',
-        )
+        await this.rollbackPartialInstall(profile, packageName)
       }
       return { packageName, version: verification.version }
     })
@@ -794,6 +791,39 @@ export class MarketInstallService {
       `--registry=${NPM_REGISTRY}`,
       ...(scope === undefined ? [] : [`--${scope}:registry=${NPM_REGISTRY}`]),
     ]
+  }
+
+  /**
+   * Roll back a partial install whose bundle update or post-update validation
+   * failed after `pnpm add` had already written `dependencies`. Removing the
+   * bundle entry first (idempotent), then removing the dependency via pnpm
+   * restores `dependencies`, `pnpm-lock.yaml`, and `node_modules` together.
+   * The rollback uses the generation signal — not the aborted operation
+   * signal — so a caller-cancelled install can still unwind. Rollback failures
+   * are recorded but never mask the original install error.
+   */
+  private async rollbackPartialInstall(profile: MarketDesktopProfile, packageName: string): Promise<never> {
+    const failures: string[] = []
+    try {
+      await setProfileBundle(profile, packageName, false)
+    } catch (cause) {
+      failures.push(`bundle: ${cause instanceof Error ? cause.message : String(cause)}`)
+    }
+    try {
+      await this.runPnpm(['remove', packageName], this.generation.signal)
+    } catch (cause) {
+      failures.push(`package: ${cause instanceof Error ? cause.message : String(cause)}`)
+    }
+    if (failures.length === 0) {
+      throw new MarketInstallError(
+        'operation-failed',
+        'The package manager changed the Profile, but the plugin bundle could not be validated. The partial install was rolled back automatically; retry the install.',
+      )
+    }
+    throw new MarketInstallError(
+      'operation-failed',
+      `The package manager changed the Profile, and the plugin bundle could not be validated. Automatic rollback also failed (${failures.join('; ')}). Use a Recovery checkpoint to restore a consistent Profile state.`,
+    )
   }
 
 }

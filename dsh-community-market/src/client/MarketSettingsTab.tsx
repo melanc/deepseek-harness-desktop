@@ -424,7 +424,9 @@ export function MarketSurface({ initialView = 'installable', readLocale, t, show
       return { installations: response.installations }
     } catch (cause) {
       if (request.signal.aborted || installationsRequest.current !== request) return
-      const message = isDesktopUnavailable(cause) ? t('desktopUnavailable') : t('installationsError')
+      const message = isDesktopUnavailable(cause)
+        ? t('desktopUnavailable')
+        : operationErrorMessage(cause, t('installationsError'))
       setInstallationsUnavailable(isDesktopUnavailable(cause))
       setInstallationsError(message)
       return { error: message }
