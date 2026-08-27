@@ -86,10 +86,11 @@ describe('published package surface', () => {
       types: './lib/types/windows-pwsh-sandbox.d.ts',
       default: './lib/windows-pwsh-sandbox.js',
     })
-    expect(manifest.exports).toHaveProperty('./windows-agent-presets', {
-      types: './lib/types/windows-agent-presets.d.ts',
-      default: './lib/windows-agent-presets.js',
+    expect(manifest.exports).toHaveProperty('./windows-subprocess', {
+      types: './lib/types/windows-subprocess.d.ts',
+      default: './lib/windows-subprocess.js',
     })
+    expect(manifest.exports).not.toHaveProperty('./windows-agent-presets')
     expect(manifest.exports).toHaveProperty('./terminal', {
       types: './lib/types/terminal.d.ts',
       default: './lib/terminal.js',
@@ -257,6 +258,38 @@ describe('published package surface', () => {
     expect(installedClient).toContain('data-dsh-workspace-drop-target')
   })
 
+  it('keeps the chat attachment drag mask outside the desktop Workspace drop target', () => {
+    const patchPath = './patches/dsh-client-ui-attachment@0.1.1-rc.2.patch'
+    const conversationPatchPath = './patches/dsh-client-ui-conversation@0.1.1-rc.2.patch'
+    expect(workspaceManifest.resolutions).toMatchObject({
+      '@deepseek-ai/dsh-client-ui-attachment@npm:0.1.1-rc.2': expect.stringContaining(patchPath),
+      '@deepseek-ai/dsh-client-ui-attachment@npm:^0.1.1-rc.2': expect.stringContaining(patchPath),
+      '@deepseek-ai/dsh-client-ui-conversation@npm:0.1.1-rc.2': expect.stringContaining(conversationPatchPath),
+      '@deepseek-ai/dsh-client-ui-conversation@npm:^0.1.1-rc.2': expect.stringContaining(conversationPatchPath),
+    })
+    const patch = readFileSync(new URL(patchPath, workspaceRoot), 'utf8')
+    const conversationPatch = readFileSync(new URL(conversationPatchPath, workspaceRoot), 'utf8')
+    const installedClient = readFileSync(new URL(
+      'node_modules/@deepseek-ai/dsh-client-ui-attachment/lib/client.js',
+      packageRoot,
+    ), 'utf8')
+    const installedConversation = readFileSync(new URL(
+      'node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js',
+      packageRoot,
+    ), 'utf8')
+    for (const source of [patch, installedClient]) {
+      expect(source).toContain('[data-dsh-workspace-drop-target]')
+      expect(source).toContain('[data-dsh-conversation-drop-target]')
+      expect(source).toContain('data-dsh-chat-drop-overlay')
+      expect(source).toContain('workspaceDropTarget(event)')
+      expect(source).toContain('reset()')
+    }
+    for (const source of [conversationPatch, installedConversation]) {
+      expect(source).toContain('data-dsh-conversation-drop-target')
+      expect(source).toContain('position: "relative"')
+    }
+  })
+
   it('keeps API selection available after overriding a provider base URL', () => {
     const patchPath = './.yarn/patches/@deepseek-ai-dsh-client-ui-settings-models-npm-0.1.1-rc.2-5348824733.patch'
     expect(workspaceManifest.resolutions).toMatchObject({
@@ -272,6 +305,27 @@ describe('published package surface', () => {
       'const baseURLOverridden = schema.hasPath(draft, ["baseURL"])',
       'const canCustomizeApi = ownsIdentity || baseURLOverridden',
       'canCustomizeApi ? (0, react_jsx_runtime.jsxs)("div"',
+    ]) {
+      expect(patch).toContain(marker)
+      expect(installedClient).toContain(marker)
+    }
+  })
+
+  it('gives the Desktop settings section a dedicated display icon', () => {
+    const patchPath = './.yarn/patches/@deepseek-ai-dsh-client-ui-settings-general-npm-0.1.1-rc.2-ef120ba0cf.patch'
+    expect(workspaceManifest.resolutions).toMatchObject({
+      '@deepseek-ai/dsh-client-ui-settings-general@npm:0.1.1-rc.2': expect.stringContaining(patchPath),
+      '@deepseek-ai/dsh-client-ui-settings-general@npm:^0.1.1-rc.2': expect.stringContaining(patchPath),
+    })
+    const patch = readFileSync(new URL(patchPath, workspaceRoot), 'utf8')
+    const installedClient = readFileSync(new URL(
+      'node_modules/@deepseek-ai/dsh-client-ui-settings-general/lib/client.js',
+      packageRoot,
+    ), 'utf8')
+    for (const marker of [
+      'function IconDesktopSettings',
+      'if (id === "desktop")',
+      'M5 14h6M8 11.5V14',
     ]) {
       expect(patch).toContain(marker)
       expect(installedClient).toContain(marker)
@@ -496,7 +550,8 @@ describe('published package surface', () => {
     const config = readFileSync(new URL('tsdown.config.ts', packageRoot), 'utf8')
 
     expect(config).toContain("'windows-pwsh-sandbox': 'src/windows-pwsh-sandbox.ts'")
-    expect(config).toContain("'windows-agent-presets': 'src/windows-agent-presets.ts'")
+    expect(config).toContain("'windows-subprocess': 'src/windows-subprocess.ts'")
+    expect(config).not.toContain("'windows-agent-presets': 'src/windows-agent-presets.ts'")
     expect(config).toContain("'windows-acl-runner': 'src/windows-acl-runner.ts'")
     expect(config).toContain("'desktop-cli': 'src/desktop-cli.ts'")
     expect(config).toContain("'desktop-runtime-environment': 'src/desktop-runtime-environment.ts'")
