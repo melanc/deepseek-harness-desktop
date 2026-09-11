@@ -522,6 +522,15 @@ export function MarketSurface({ initialView = 'installable', readLocale, t, show
     }
   }, [loadInstallable, loadState])
 
+  useEffect(() => {
+    // Source state can resolve before React commits it. Load after the view and
+    // state are committed, so a click in that gap cannot miss the first catalog.
+    if (view === 'discover' && state !== undefined && selectedSource(state.sources) !== undefined
+      && catalog === undefined && readRequest.current === undefined) {
+      void loadCatalog(state, appliedQuery, selectedCategories)
+    }
+  }, [view, state, catalog, appliedQuery, selectedCategories, loadCatalog])
+
   const items = useMemo(() => catalog?.results.flatMap(result =>
     (result.snapshot?.items ?? []).map(item => ({ item, source: result.source, stale: result.stale }))) ?? [], [catalog])
   const installableCategoryOptions = installableIndex?.categories ?? []
@@ -682,9 +691,6 @@ export function MarketSurface({ initialView = 'installable', readLocale, t, show
       setInstallableLoading(false)
       setInstallableLoadingMore(false)
       setInstallationsLoading(false)
-      if (state !== undefined && catalog === undefined && readRequest.current === undefined) {
-        void loadCatalog(state, appliedQuery, selectedCategories)
-      }
     } else {
       installableRequest.current?.abort()
       installationsRequest.current?.abort()

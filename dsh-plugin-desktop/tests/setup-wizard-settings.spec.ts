@@ -15,7 +15,9 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   defaultDesktopSetupWizardSettings,
   migrateDesktopBrowserAccessSettings,
+  migrateDesktopWindowMaterialSettings,
   readDesktopSetupWizardSettings,
+  sameDesktopSetupWizardSettings,
   updateDesktopSetupWizardSettings,
   type DesktopSetupWizardSettings,
 } from '../src/setup-wizard-settings.ts'
@@ -53,6 +55,19 @@ function values(overrides: Partial<DesktopSetupWizardSettings> = {}): DesktopSet
 }
 
 describe('Desktop Setup Wizard settings document', () => {
+  it('compares the normalized leaves used by the startup re-prepare gate', () => {
+    const current = values()
+
+    expect(sameDesktopSetupWizardSettings(current, structuredClone(current))).toBe(true)
+    expect(sameDesktopSetupWizardSettings(current, values({ mode: 'extended' }))).toBe(false)
+    expect(sameDesktopSetupWizardSettings(current, values({
+      notifications: {
+        ...current.notifications,
+        notifyOnTurnCompletion: true,
+      },
+    }))).toBe(false)
+  })
+
   it('returns platform defaults for an absent exact settings document', () => {
     const root = temporaryDirectory()
     expect(readDesktopSetupWizardSettings(join(root, 'settings.yaml')))
@@ -62,7 +77,7 @@ describe('Desktop Setup Wizard settings document', () => {
     expect(defaultDesktopSetupWizardSettings()).toMatchObject({
       mode: 'compatibility',
       macosMaterial: 'transparent',
-      windowsMaterial: 'acrylic',
+      windowsMaterial: 'off',
       openBrowser: false,
       networkExposure: 'loopback',
     })
@@ -137,7 +152,7 @@ describe('Desktop Setup Wizard settings document', () => {
     const next = values({
       mode: 'compatibility',
       macosMaterial: 'transparent',
-      windowsMaterial: 'acrylic',
+      windowsMaterial: 'off',
     })
 
     await updateDesktopSetupWizardSettings(path, next)
@@ -147,7 +162,7 @@ describe('Desktop Setup Wizard settings document', () => {
     expect(output['dsh-desktop']).toMatchObject({
       mode: 'compatibility',
       macosMaterial: 'transparent',
-      windowsMaterial: 'acrylic',
+      windowsMaterial: 'off',
       future: 42,
       openBrowser: true,
       networkExposure: 'lan',
@@ -298,7 +313,7 @@ describe('Desktop Setup Wizard settings document', () => {
     })
   })
 
-  it('migrates legacy LAN to explicit browser access only in compatibility mode', async () => {
+  it('preserves legacy LAN intent by materializing compatibility browser access', async () => {
     const path = join(temporaryDirectory(), 'legacy.yaml')
     writeFileSync(path, [
       'dsh-desktop:',
@@ -309,6 +324,7 @@ describe('Desktop Setup Wizard settings document', () => {
     ].join('\n'))
 
     await expect(migrateDesktopBrowserAccessSettings(path)).resolves.toBe(true)
+    await expect(migrateDesktopBrowserAccessSettings(path)).resolves.toBe(false)
     expect(parseDocument(readFileSync(path, 'utf8')).toJS()).toMatchObject({
       'dsh-desktop': {
         mode: 'compatibility',
@@ -392,11 +408,41 @@ describe('Desktop Setup Wizard settings document', () => {
     expect(readFileSync(outside, 'utf8')).toBe('outside: true\n')
   })
 
+  it('atomically migrates the removed Acrylic preference to off', async () => {
+    const root = temporaryDirectory()
+    const path = join(root, 'settings.yaml')
+    writeFileSync(path, [
+      '# preserve material migration comments',
+      'unrelated:',
+      '  keep: true',
+      'dsh-desktop:',
+      '  mode: extended',
+      '  windowsMaterial: acrylic',
+      '  future: retained',
+      '',
+    ].join('\n'), { mode: 0o600 })
+
+    expect(readDesktopSetupWizardSettings(path).windowsMaterial).toBe('off')
+    await expect(migrateDesktopWindowMaterialSettings(path)).resolves.toBe(true)
+    await expect(migrateDesktopWindowMaterialSettings(path)).resolves.toBe(false)
+
+    const migrated = readFileSync(path, 'utf8')
+    expect(migrated).toContain('# preserve material migration comments')
+    expect(parseDocument(migrated).toJS()).toMatchObject({
+      unrelated: { keep: true },
+      'dsh-desktop': {
+        mode: 'extended',
+        windowsMaterial: 'off',
+        future: 'retained',
+      },
+    })
+  })
+
   it('serializes concurrent complete updates without producing a torn document', async () => {
     const root = temporaryDirectory()
     const path = join(root, 'settings.yaml')
     writeFileSync(path, 'unrelated:\n  keep: true\n', { mode: 0o600 })
-    const first = values({ mode: 'extended', windowsMaterial: 'acrylic', openBrowser: false, networkExposure: 'loopback' })
+    const first = values({ mode: 'extended', windowsMaterial: 'off', openBrowser: false, networkExposure: 'loopback' })
     const second = values({ mode: 'compatibility', windowsMaterial: 'mica', networkExposure: 'loopback' })
 
     await Promise.all([
