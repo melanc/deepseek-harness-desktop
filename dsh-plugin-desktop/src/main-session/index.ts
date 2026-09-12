@@ -268,7 +268,7 @@ export function apply(ctx: Context): void {
         // into prompt assembly (`{{model}}`/`{{provider}}` variables) and into
         // each request, so the standard preset's persona resolves.
         const selection = createMainSelection(ctx)
-        const setup = async (agentCtx: Context): Promise<void> => {
+        const setup = async (agentCtx: Context, agent: Agent): Promise<void> => {
           try {
             registerMainSessionTools(agentCtx, innerService)
             registerUserMemorySection(agentCtx, memoryStore)
@@ -283,7 +283,7 @@ export function apply(ctx: Context): void {
             const toolsRuntime = agentCtx.get('tools') as
               | { schemas(scope?: unknown): Array<{ name: string }> }
               | undefined
-            const visible = toolsRuntime?.schemas(agentCtx.agent)
+            const visible = toolsRuntime?.schemas(agent)
             ctx.logger.info(
               `${LOG_TAG} main agent setup complete; visible tools: ${
                 visible === undefined ? 'n/a' : visible.map(tool => tool.name).join(',')
@@ -786,7 +786,7 @@ async function joinDefaultAgentPreset(hostCtx: Context, agentCtx: Context): Prom
  * @param agent - the freshly created/resumed main agent.
  */
 function kickstartMainSessionIfBlank(hostCtx: Context, agent: Agent): void {
-  const events = agent.session?.events
+  const events = agent.session?.snapshotEvents()
   if (events !== undefined && events.some(event => event.type === 'turn/start')) return
   try {
     agent.followup(createUserMessage({

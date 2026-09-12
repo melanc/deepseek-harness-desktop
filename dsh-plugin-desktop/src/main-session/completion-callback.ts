@@ -46,10 +46,6 @@ export interface TurnEndEvent {
 
 /** The subset of a session the callback needs to read the final text. */
 export interface CompletionSessionView {
-  readonly events: ReadonlyArray<{
-    readonly type: string
-    readonly seq: number
-  }>
   deriveMessages(): ReadonlyArray<{
     readonly role: string
     readonly content: readonly unknown[]

@@ -1,6 +1,6 @@
 import { FuseV1Options, FuseVersion, type FuseConfig } from '@electron/fuses'
 import { FuseState } from '@electron/fuses/dist/constants.js'
-import { Arch } from 'builder-util'
+import { Arch, archFromString } from 'builder-util'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import {
@@ -215,6 +215,21 @@ describe('final Electron fuse verification', () => {
     ])
     expect(exists).toHaveBeenCalledTimes(1)
     expect(exists).toHaveBeenCalledWith(universalExecutable)
+  })
+
+  it('recovers the host architecture for an empty dir-only target map', () => {
+    const platform = { buildConfigurationKey: 'mac' }
+    const built = {
+      outDir: '/build',
+      configuration: { productName: 'DSH Desktop', mac: { target: ['dir'] } },
+      platformToTargets: new Map([[platform, new Map()]]),
+    } satisfies ElectronArtifactBuildResult
+
+    expect(resolveFinalPackagedRuntimeContexts(built, () => true))
+      .toEqual([expect.objectContaining({
+        arch: archFromString(process.arch),
+        electronPlatformName: 'darwin',
+      })])
   })
 
   it('checks every requested final executable after all artifact builds', async () => {

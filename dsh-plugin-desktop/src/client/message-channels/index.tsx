@@ -18,7 +18,7 @@
  * settings document.
  */
 
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import * as React from 'react'
 
 /** Settings namespace id for the message-channels feature. */

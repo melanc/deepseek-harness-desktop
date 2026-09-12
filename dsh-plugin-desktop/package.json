@@ -71,6 +71,14 @@
       "types": "./lib/types/updates.d.ts",
       "default": "./lib/updates.js"
     },
+    "./message-channels": {
+      "types": "./lib/types/message-channels.d.ts",
+      "default": "./lib/message-channels.js"
+    },
+    "./main-session": {
+      "types": "./lib/types/main-session.d.ts",
+      "default": "./lib/main-session.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -277,6 +285,7 @@
     "@deepseek-ai/dsh-workflow": "0.1.5-rc.1",
     "@deepseek-ai/dsh-workspace": "0.1.5-rc.1",
     "@deepseek-ai/schemastery": "^3.18.2",
+    "@larksuiteoapi/node-sdk": "^1.65.0",
     "adm-zip": "^0.6.0",
     "dsh-community-market": "0.1.0-dev.0",
     "dshmarket": "1.38.1",

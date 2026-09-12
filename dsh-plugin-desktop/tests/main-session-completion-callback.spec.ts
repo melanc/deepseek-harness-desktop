@@ -14,7 +14,6 @@ import {
 
 function sessionView(assistantText?: string): CompletionSessionView {
   return {
-    events: [{ type: 'turn/end', seq: 10 }],
     deriveMessages: () => assistantText === undefined
       ? []
       : [{ role: 'assistant', content: [{ type: 'text', text: assistantText }] }],
@@ -136,7 +135,6 @@ describe('handleSessionEvent', () => {
 describe('readNewestAssistantText', () => {
   it('returns the newest assistant text', () => {
     const session = {
-      events: [],
       deriveMessages: () => [
         { role: 'user', content: [{ type: 'text', text: 'hi' }] },
         { role: 'assistant', content: [{ type: 'text', text: 'hello' }] },
@@ -147,7 +145,6 @@ describe('readNewestAssistantText', () => {
 
   it('returns null when there is no assistant text', () => {
     const session = {
-      events: [],
       deriveMessages: () => [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
     } as CompletionSessionView
     expect(readNewestAssistantText(session)).toBeNull()

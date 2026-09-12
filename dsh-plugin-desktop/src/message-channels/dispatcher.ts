@@ -179,7 +179,7 @@ export class MessageDispatcher {
     const messages = agent.session.deriveMessages()
     // The newest assistant/message event determines the position of the
     // newest assistant surface node; find its seq once.
-    const newestAssistantEvent = agent.session.events.findLast((e) => e.type === 'assistant/message')
+    const newestAssistantEvent = agent.session.snapshotEvents().findLast((e) => e.type === 'assistant/message')
     if (newestAssistantEvent === undefined || newestAssistantEvent.seq <= afterSeq) {
       return null
     }

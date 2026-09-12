@@ -372,7 +372,7 @@ export class MainSessionService {
 
   /** Read the newest `turn/end` event appended after `afterSeq`, if any. */
   private readTurnEndAfter(agent: Agent, afterSeq: number): { type: string; seq: number } | null {
-    const event = agent.session.events.findLast(
+    const event = agent.session.snapshotEvents().findLast(
       (e) => e.type === 'turn/end' && e.seq > afterSeq,
     )
     if (event === undefined) return null
@@ -394,7 +394,7 @@ export class MainSessionService {
       readonly type: string
       readonly data?: { id?: string; toolName?: string }
     }
-    const events = agent.session.events as readonly ApprovalEventView[]
+    const events = agent.session.snapshotEvents() as readonly ApprovalEventView[]
     const decided = new Set<string>()
     // Walk tail-first; the newest unanswered ask is the one the session is
     // blocked on. asked/decided carry the same approval id, so pair by id.
@@ -418,7 +418,7 @@ export class MainSessionService {
 
   /** Read the newest assistant text block appended after `afterSeq`, if any. */
   private readNewestAssistantText(agent: Agent, afterSeq: number): string | null {
-    const newestAssistantEvent = agent.session.events.findLast(
+    const newestAssistantEvent = agent.session.snapshotEvents().findLast(
       (e) => e.type === 'assistant/message',
     )
     if (newestAssistantEvent === undefined || newestAssistantEvent.seq <= afterSeq) {
