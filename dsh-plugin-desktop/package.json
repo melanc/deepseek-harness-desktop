@@ -289,7 +289,7 @@
     "@deepseek-ai/dsh-workflow": "0.1.5-rc.1",
     "@deepseek-ai/dsh-workspace": "0.1.5-rc.1",
     "@deepseek-ai/schemastery": "^3.18.2",
-    "@earendil-works/pi-ai": "0.82.1",
+    "@earendil-works/pi-ai": "^0.85.1",
     "@larksuiteoapi/node-sdk": "^1.65.0",
     "adm-zip": "^0.6.0",
     "dsh-community-market": "0.1.0-dev.0",

@@ -216,10 +216,13 @@ function requestedArchitectures(
   )
   if (fromConfiguration.length > 0) return fromConfiguration
 
-  // electron-builder's NoOpTarget (used by --dir) deliberately retains neither
-  // the arch nor its packager. With no explicit target.arch, electron-builder
-  // itself defaults that target to the Node process architecture.
-  if (targetNames.has(DIR_TARGET)) return [architectureNumber(process.arch, description)]
+  // electron-builder's platform packagers each skip DIR_TARGET without
+  // registering it in the target map, so a --dir build leaves that map empty.
+  // With no explicit target.arch, electron-builder itself defaults a --dir
+  // build to the Node process architecture.
+  if (targetNames.has(DIR_TARGET) || targets.size === 0) {
+    return [architectureNumber(process.arch, description)]
+  }
 
   throw new Error(
     `dsh-plugin-desktop: cannot determine requested Electron architecture(s) for ${key}`,

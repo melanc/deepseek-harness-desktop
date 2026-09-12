@@ -14,7 +14,6 @@ import {
 
 function sessionView(assistantText?: string): CompletionSessionView {
   return {
-    events: [{ type: 'turn/end', seq: 10 }],
     deriveMessages: () => assistantText === undefined
       ? []
       : [{ role: 'assistant', content: [{ type: 'text', text: assistantText }] }],
