@@ -16,7 +16,6 @@ import { installDesktopDirectoryPickerBridge } from './directory-picker.ts'
 import { parseDesktopClientEnvironment } from './environment.ts'
 import { applyExtendedShell } from './extended-shell.ts'
 import { applyMessageChannelsSection } from './message-channels/index.tsx'
-import { applyTasksView } from './tasks-view/index.tsx'
 import { desktopWindowService, provideDesktopWindow } from './window-service.ts'
 
 export { applyAdvancedShell } from './advanced-shell.ts'
@@ -65,7 +64,6 @@ export type {
   DesktopClientPlatform,
 } from './environment.ts'
 export { applyMessageChannelsSection } from './message-channels/index.tsx'
-export { applyTasksView, TASKS_VIEW_ID } from './tasks-view/index.tsx'
 export { desktopWindowService, provideDesktopWindow } from './window-service.ts'
 export type {
   DesktopWindowDragRegion,
@@ -110,9 +108,6 @@ export function apply(ctx: ClientContext): void {
   // Message-channels settings section: registers a `settings.section` page
   // when the settings scope service is available (composed by ui-settings).
   applyMessageChannelsSection(ctx)
-
-  // Inputs view: registers the 会话页「输入」tab (records user inputs).
-  applyTasksView(ctx)
 
   // Archive confirmation: wrap the archive RPC with a confirmation dialog.
   applyArchiveConfirm(ctx)
