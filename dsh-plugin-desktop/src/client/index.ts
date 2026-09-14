@@ -9,14 +9,17 @@ import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-ui-theme/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import { applyAdvancedShell } from './advanced-shell.ts'
+import { applyArchiveConfirm } from './archive-confirm/index.ts'
 import { startRendererBootReporter } from './boot-health.ts'
 import { applyDesktopSettings } from './desktop-settings.ts'
 import { installDesktopDirectoryPickerBridge } from './directory-picker.ts'
 import { parseDesktopClientEnvironment } from './environment.ts'
 import { applyExtendedShell } from './extended-shell.ts'
+import { applyMessageChannelsSection } from './message-channels/index.tsx'
 import { desktopWindowService, provideDesktopWindow } from './window-service.ts'
 
 export { applyAdvancedShell } from './advanced-shell.ts'
+export { applyArchiveConfirm, ARCHIVE_CONFIRM_OVERLAY_ID } from './archive-confirm/index.ts'
 export { applyDesktopSettings } from './desktop-settings.ts'
 export { applyExtendedShell, applyFramedShell } from './extended-shell.ts'
 export {
@@ -60,6 +63,7 @@ export type {
   DesktopClientMode,
   DesktopClientPlatform,
 } from './environment.ts'
+export { applyMessageChannelsSection } from './message-channels/index.tsx'
 export { desktopWindowService, provideDesktopWindow } from './window-service.ts'
 export type {
   DesktopWindowDragRegion,
@@ -100,4 +104,11 @@ export function apply(ctx: ClientContext): void {
   }
   if (environment.mode === 'advanced') applyAdvancedShell(ctx, environment)
   if (environment.mode === 'extended') applyExtendedShell(ctx, environment, desktopSettings)
+
+  // Message-channels settings section: registers a `settings.section` page
+  // when the settings scope service is available (composed by ui-settings).
+  applyMessageChannelsSection(ctx)
+
+  // Archive confirmation: wrap the archive RPC with a confirmation dialog.
+  applyArchiveConfirm(ctx)
 }
