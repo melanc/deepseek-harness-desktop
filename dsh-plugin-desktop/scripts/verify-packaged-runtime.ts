@@ -65,6 +65,9 @@ function packageVersion(packageRoot: string): string {
 const DSH_RUNTIME_VERSION = packageVersion(DSH_PACKAGE_ROOT)
 const PNPM_RUNTIME_VERSION = packageVersion(PNPM_PACKAGE_ROOT)
 
+/** Electron's fallback application archive, stale once a target disables ASAR. */
+export const DEFAULT_APP_ARCHIVE = 'default_app.asar'
+
 /** Maximum physical file count accepted beside ASAR after smart unpack. */
 export const MAX_UNPACKED_RUNTIME_FILES = 1_500
 
@@ -449,6 +452,35 @@ export function resolvePackagedApplicationRoot(context: PackagedRuntimeContext):
   throw new Error(
     `dsh-plugin-desktop: unsupported Electron afterPack platform ${JSON.stringify(context.electronPlatformName)}`,
   )
+}
+
+/** Resolve the Electron resources directory that hosts the application payload. */
+export function resolvePackagedResourcesRoot(context: PackagedRuntimeContext): string {
+  return dirname(resolvePackagedApplicationRoot(context))
+}
+
+/**
+ * Electron ships `default_app.asar` as the fallback application in every
+ * distribution. A target that disables ASAR keeps the stale archive beside the
+ * unpacked `app/` directory, and Electron's ASAR-aware `fs.stat` answers for it
+ * with a plain `Stats` record whose fields are not `BigInt` even when the caller
+ * passed `{ bigint: true }`. Filesystem backends that mask metadata with BigInt
+ * literals (`dsh-fs-local` does `mode & 511n`) then throw mid-listing, so any
+ * directory walk over the resources root fails. The archive is dead weight once
+ * ASAR is disabled, so remove it and keep the packaged tree walkable.
+ * @param context - completed application directory and target platform.
+ * @param remove - remover used to delete the stale archive.
+ * @returns the removed archive path, or undefined when there was nothing to remove.
+ */
+export function removeStaleDefaultAppArchive(
+  context: PackagedRuntimeContext,
+  remove: (archivePath: string) => void = (archivePath) => { rmSync(archivePath, { force: true }) },
+): string | undefined {
+  if (usesAsarLayout(context)) return undefined
+  const archivePath = join(resolvePackagedResourcesRoot(context), DEFAULT_APP_ARCHIVE)
+  if (!existsSync(archivePath)) return undefined
+  remove(archivePath)
+  return archivePath
 }
 
 /** Return whether Electron Builder emitted the ASAR layout for this target. */
@@ -859,6 +891,9 @@ export async function afterPack(
   verify: typeof verifyPackagedRuntime = verifyPackagedRuntime,
   report: (summary: UnpackedRuntimeSummary) => void = reportUnpackedRuntime,
 ): Promise<void> {
+  // Drop Electron's fallback archive before verifying so every later walk of the
+  // resources root (including afterAllArtifactBuild's smoke) sees a clean tree.
+  removeStaleDefaultAppArchive(context)
   const summary = verify(context)
   report(summary)
 }

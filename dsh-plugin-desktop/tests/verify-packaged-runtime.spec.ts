@@ -30,6 +30,7 @@ import {
   REQUIRED_POSIX_FS_EXT_ENTRIES,
   REQUIRED_UNPACKED_RUNTIME_ENTRIES,
   REQUIRED_WINDOWS_X64_NODE_PTY_ENTRIES,
+  removeStaleDefaultAppArchive,
   resolvePackagedApplicationRoot,
   resolvePackagedAsarPath,
   resolvePackagedExecutablePath,
@@ -279,6 +280,112 @@ describe('packaged desktop runtime verification', () => {
     )
 
     expect(calls).toEqual(['static', 'report'])
+  })
+
+  it('removes Electron\'s stale fallback archive from an ASAR-free resources root', () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-default-app-'))
+    try {
+      const resources = join(root, 'DSH Desktop.app', 'Contents', 'Resources')
+      mkdirSync(resources, { recursive: true })
+      const archive = join(resources, 'default_app.asar')
+      writeFileSync(archive, 'stale')
+      const removed: string[] = []
+
+      const result = removeStaleDefaultAppArchive(
+        {
+          ...context(root, 'darwin'),
+          packager: {
+            appInfo: { productFilename: 'DSH Desktop' },
+            platformSpecificBuildOptions: { asar: false },
+          },
+        },
+        path => {
+          removed.push(path)
+          rmSync(path, { force: true })
+        },
+      )
+
+      expect(result).toBe(archive)
+      expect(removed).toEqual([archive])
+      expect(() => readFileSync(archive)).toThrow()
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('removes the stale archive from the flat resources root on win32 and linux', () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-default-app-'))
+    try {
+      for (const platform of ['win32', 'linux']) {
+        const resources = join(root, platform, 'resources')
+        mkdirSync(resources, { recursive: true })
+        const archive = join(resources, 'default_app.asar')
+        writeFileSync(archive, 'stale')
+        const removed: string[] = []
+
+        const result = removeStaleDefaultAppArchive(
+          {
+            ...context(join(root, platform), platform),
+            packager: {
+              appInfo: { productFilename: 'DSH Desktop' },
+              platformSpecificBuildOptions: { asar: false },
+            },
+          },
+          path => {
+            removed.push(path)
+            rmSync(path, { force: true })
+          },
+        )
+
+        expect(result).toBe(archive)
+        expect(removed).toEqual([archive])
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('leaves the fallback archive alone when ASAR is in use or already absent', () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-default-app-'))
+    try {
+      const resources = join(root, 'DSH Desktop.app', 'Contents', 'Resources')
+      mkdirSync(resources, { recursive: true })
+      const archive = join(resources, 'default_app.asar')
+      writeFileSync(archive, 'keep')
+      const asarContext = {
+        ...context(root, 'darwin'),
+        packager: {
+          appInfo: { productFilename: 'DSH Desktop' },
+          platformSpecificBuildOptions: { asar: true },
+        },
+      }
+      const asarFreeContext = {
+        ...context(root, 'darwin'),
+        packager: {
+          appInfo: { productFilename: 'DSH Desktop' },
+          platformSpecificBuildOptions: { asar: false },
+        },
+      }
+
+      // An ASAR target keeps its archive: only an unpacked app leaves it stale.
+      expect(removeStaleDefaultAppArchive(asarContext, () => { throw new Error('must not remove') }))
+        .toBeUndefined()
+      expect(readFileSync(archive, 'utf8')).toBe('keep')
+
+      // A second pass over an already-clean tree is a no-op rather than an error.
+      const removed: string[] = []
+      const deleteArchive = (path: string): void => {
+        removed.push(path)
+        rmSync(path, { force: true })
+      }
+      removeStaleDefaultAppArchive(asarFreeContext, deleteArchive)
+      expect(removed).toEqual([archive])
+      expect(removeStaleDefaultAppArchive(asarFreeContext, deleteArchive))
+        .toBeUndefined()
+      expect(removed).toEqual([archive])
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 
   it('tracks ripgrep and the ConPTY native surface required on Windows', () => {
