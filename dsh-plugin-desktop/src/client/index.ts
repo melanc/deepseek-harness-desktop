@@ -16,6 +16,7 @@ import { installDesktopDirectoryPickerBridge } from './directory-picker.ts'
 import { parseDesktopClientEnvironment } from './environment.ts'
 import { applyExtendedShell } from './extended-shell.ts'
 import { applyMessageChannelsSection } from './message-channels/index.tsx'
+import { installSidebarFooterStyles } from './sidebar-footer-styles.ts'
 import { desktopWindowService, provideDesktopWindow } from './window-service.ts'
 
 export { applyAdvancedShell } from './advanced-shell.ts'
@@ -92,6 +93,12 @@ export function apply(ctx: ClientContext): void {
     'dsh-plugin-desktop: native window geometry service',
   )
   const desktopSettings = applyDesktopSettings(ctx, environment)
+  // Every mode shares the footer seat: upstream's row flex would otherwise let
+  // two launchers crush each other, and compatibility mode installs no frame styles.
+  ctx.effect(
+    () => installSidebarFooterStyles(),
+    'dsh-plugin-desktop: sidebar footer stacking styles',
+  )
   ctx.effect(
     () => startRendererBootReporter(ctx.loader),
     'dsh-plugin-desktop: renderer boot health report',
