@@ -294,7 +294,7 @@ describe('published package surface', () => {
       expect(String(resolution)).toContain(runtimeVersion)
     }
     for (const [selector, resolution] of betaResolutions) {
-      expect(selector).toMatch(/@npm:\^?0\.1\.5-rc\.2$/u)
+      expect(selector).toMatch(/@npm:\^?0\.1\.6-alpha\.1$/u)
       expect(String(resolution)).toContain(betaRuntimeVersion)
     }
   })
@@ -609,6 +609,7 @@ describe('published package surface', () => {
     const readPreferences = main.indexOf('readDesktopProfilePreferences(marketUserDataDir, activeProfileDir)')
     const profileMarket = main.indexOf('desktopProfileMarketSnapshot(profilePreferences.market)', readPreferences)
     const firstPrepare = main.indexOf('let prepared = prepareDesktopProfile(', profileMarket)
+    const legacyPresetMigration = main.indexOf('migrateLegacyAgentPresetSettings(', firstPrepare)
     const missingState = main.indexOf('if (profilePreferences === undefined)', firstPrepare)
     const browserMigration = main.indexOf('migrateDesktopBrowserAccessSettings(', missingState)
     const materialMigration = main.indexOf('migrateDesktopWindowMaterialSettings(', browserMigration)
@@ -633,6 +634,8 @@ describe('published package surface', () => {
     expect(aaWrite).toContain('desktopProfilePreferencesFromSettings(')
     expect(aaWrite).not.toContain('...current')
     expect(projection).toBeGreaterThanOrEqual(0)
+    expect(legacyPresetMigration).toBeGreaterThan(firstPrepare)
+    expect(legacyPresetMigration).toBeLessThan(missingState)
     const projectionSource = preferencesSource.slice(projection, projectionEnd)
     expect(projectionSource).toContain("Pick<DesktopProfilePreferences, 'mode' | 'openBrowser' | 'networkExposure'>")
     expect(projectionSource).not.toContain('port:')
@@ -761,7 +764,7 @@ describe('published package surface', () => {
 
   it('fixes the installed application identity', () => {
     expect(workspaceManifest.version).toBeUndefined()
-    expect(manifest.version).toBe('2.0.10')
+    expect(manifest.version).toBe('2.0.11')
     expect(manifest.build?.productName).toBe('DSH Desktop')
     expect(manifest.build?.appId).toBe('ai.deepseek.dsh.desktop')
     expect(manifest.build?.asar).toBe(false)
