@@ -168,7 +168,7 @@ export function applyMessageChannelsSection(ctx: ClientContext): void {
    * first (host order). Falls back to the workspace basename, then the
    * session id, when the host has no nicer label.
    *
-   * Resolves `connection` per call (the tasks-view precedent) so a section
+   * Resolves `connection` per call so a section
    * opened before the connection service is present still lists sessions.
    * @returns the dropdown options; empty when the sessions api is absent.
    */

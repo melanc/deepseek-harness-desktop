@@ -841,7 +841,7 @@ main-session        主会话编排
 
 ---
 
-## 10. 桌面自研功能：主会话、消息通道、任务视图
+## 10. 桌面自研功能：主会话、消息通道
 
 ### 10.1 主会话（main-session）——系统级"统一入口 + 全局记忆 + 管理调度"
 
@@ -880,12 +880,12 @@ main-session        主会话编排
 - 配置走 `settings.yaml` 的 `message-channels` namespace，`scope.watch()` 触发自动重连，无需重启。
 - 细节：secret 字段是 **write-only**（settings 的 `role('secret')` 每次读取脱敏），客户端读不回已保存值，输入框始终为空属正常，重新输入即覆盖。
 
-### 10.3 任务视图（tasks-view）——会话页第三个 tab
+### 10.3 会话页 tab：仅保留上游的「对话」「轨迹」
 
-- 会话页原有「对话」「轨迹」两个 tab，由 `conversation.view` slot 驱动；新增「任务」tab（order 20）。
-- 通过 `api.sessions.history` 读事件流，**只保留 `source.kind === 'user'` 的真实用户输入**（插件注入的 IM 消息、主会话派发的任务都被过滤掉），按时间倒序展示——"我在这个会话里问过什么"的轻量回顾。
+- 会话页 tab 由 `conversation.view` slot 驱动，上游内置「对话」（id `chat`，order 0）与「轨迹」（id `trajectory`，order 10）。
+- 桌面曾在 `dsh-plugin-desktop/src/client/tasks-view/` 注册第三个「输入」tab（id `inputs`，order 20）。该功能与源码**已彻底移除**，不再随包发布。
 
-这三个功能合起来展示了一条清晰的路径：**上游提供事件流与 agent 接口，桌面用 slot/service/scope 组合出产品功能，全程不碰上游源码。**
+这两个功能合起来展示了一条清晰的路径：**上游提供事件流与 agent 接口，桌面用 slot/service/scope 组合出产品功能，全程不碰上游源码。**
 
 ---
 
