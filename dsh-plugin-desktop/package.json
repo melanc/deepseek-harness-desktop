@@ -320,7 +320,7 @@
     "@deepseek-ai/dsh-workflow": "0.2.0-rc.2",
     "@deepseek-ai/dsh-workspace": "0.2.0-rc.2",
     "@deepseek-ai/schemastery": "^3.18.4",
-    "@earendil-works/pi-ai": "^0.85.1",
+    "@earendil-works/pi-ai": "^0.87.1",
     "@larksuiteoapi/node-sdk": "^1.65.0",
     "adm-zip": "^0.6.0",
     "dsh-community-market": "0.1.0-dev.0",
