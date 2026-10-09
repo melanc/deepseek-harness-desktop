@@ -18,7 +18,7 @@
 - [7. 能力接缝：可整体替换的能力](#7-能力接缝可整体替换的能力)
 - [8. Web Client：loopback 载体与前端插件](#8-web-clientloopback-载体与前端插件)
 - [9. DSH Desktop：薄的 Electron 宿主](#9-dsh-desktop薄的-electron-宿主)
-- [10. 桌面自研功能：主会话、消息通道、任务视图](#10-桌面自研功能主会话消息通道任务视图)
+- [10. 桌面自研功能：主会话、消息通道](#10-桌面自研功能主会话消息通道)
 - [11. 插件市场与生态](#11-插件市场与生态)
 - [12. 打包、沙箱与安全](#12-打包沙箱与安全)
 - [13. 自动化与 SDK](#13-自动化与-sdk)
@@ -877,7 +877,7 @@ main-session        主会话编排
 
 
 - 入站分发：消息 → `agent.followup()` 注入目标会话 → assistant 回复自动回发（与主会话复用同一注入/轮询模式）。
-- 配置走 `settings.yaml` 的 `message-channels` namespace，`scope.watch()` 触发自动重连，无需重启。
+- 配置走 Loader 条目自己的 `Config`（条目 id 即 settings namespace `message-channels`，见 `cordis.patch.yml`）。字段标了 `.volatile()`，上游把改动**原地写回**同一个 config 对象并派发 `loader/volatile-update`，插件据此自动重连，无需重启。
 - 细节：secret 字段是 **write-only**（settings 的 `role('secret')` 每次读取脱敏），客户端读不回已保存值，输入框始终为空属正常，重新输入即覆盖。
 
 ### 10.3 会话页 tab：仅保留上游的「对话」「轨迹」
