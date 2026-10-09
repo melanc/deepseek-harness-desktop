@@ -40,7 +40,7 @@ const CLAUDE_CLI_UA = 'claude-cli/2.1.0'
  * the Claude Code identity. Only these routes are rewritten; every other
  * provider keeps the harness attribution.
  */
-const REWRITE_PROVIDERS = new Set(['tal-code-plan'])
+const REWRITE_PROVIDERS = new Set(['tal-code-plan', 'deepseek-tal'])
 
 /** Apply the user-agent rewrite as one prototype patch, disposed with the plugin. */
 export function apply(ctx: Context): void {
