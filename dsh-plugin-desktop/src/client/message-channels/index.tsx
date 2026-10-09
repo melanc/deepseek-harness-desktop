@@ -2,8 +2,8 @@
  * message-channels -- Client settings section
  *
  * Web Client plugin registering a `settings.section` page for configuring
- * the message channels. The section reads/writes the `messageChannels`
- * settings namespace through `ctx.settingsScope` (loopback-only).
+ * the message channels. The section reads/writes the `message-channels`
+ * settings entry through `ctx.configForms` (loopback-only).
  *
  * v1 scope:
  * - per-channel enable + credentials (whole-channel object writes);
@@ -19,37 +19,29 @@
  */
 
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
+import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client'
 import * as React from 'react'
+import { bindDesktopSettingsForm } from '../settings-bridge.ts'
 
-/** Settings namespace id for the message-channels feature. */
+/** Settings namespace id for the message-channels feature (the Loader entry id). */
 const MESSAGE_CHANNELS_NS = 'message-channels'
 
 /** Select value selecting the manual-input branch. */
 const MANUAL_VALUE = '__manual__'
 
 // ============================================================
-// Settings scope surface
+// Settings form surface
 // ============================================================
 
-/** Snapshot store shape returned by the settings scope. */
-interface SettingsSnapshot {
-  status: string
-  value?: Record<string, unknown>
-  revision?: number
-  writable: boolean
-}
-
-/** Minimal settings scope controller surface. */
-interface SettingsScope {
-  getSnapshot(): SettingsSnapshot
-  subscribe(listener: () => void): () => void
-  set(field: string, value: unknown): Promise<unknown>
-}
-
-/** Minimal settings-scope binder resolved dynamically from the client ctx. */
-interface SettingsScopeBinder {
-  bind(spec: { namespace: string }): SettingsScope
-}
+/**
+ * The entry's client-side config form.
+ *
+ * DSH 0.2.0 replaced the `settingsScope` service with `ctx.configForms`: one
+ * shared describe mirror plus each entry's serialized writes. Its snapshot
+ * carries the same `status`/`value`/`revision`/`writable` fields the section
+ * already rendered.
+ */
+type MessageChannelsForm = ConfigForm<Record<string, unknown>>
 
 // ============================================================
 // Session-list surface (loose projection of connection.api.sessions)
@@ -121,22 +113,18 @@ interface SessionOption {
 /**
  * Register the message-channels settings section.
  *
- * Resolves `settingsScope` and `connection` dynamically (`ctx.get`) so the
- * desktop client bundle still activates in compositions without those
- * services; the section simply does nothing there. `ctx.slots` is always
- * present.
+ * The form is bound lazily inside the slot's `inject` factory, and
+ * `connection` is resolved per call, so the section still registers in
+ * compositions that only provide `slots`.
  */
 export function applyMessageChannelsSection(ctx: ClientContext): void {
-  const binder = ctx.get('settingsScope') as SettingsScopeBinder | undefined
-  if (binder === undefined) return
-
   ctx.slots.inject('settings.section', () => ctx.slots.register({
     name: 'settings.section',
     id: 'message-channels',
     order: 60,
     label: () => '消息通道',
     inject: () => ({
-      scope: binder.bind({ namespace: MESSAGE_CHANNELS_NS }),
+      scope: bindDesktopSettingsForm<Record<string, unknown>>(ctx, MESSAGE_CHANNELS_NS),
       listSessions,
       describeSecrets,
     }),
@@ -247,7 +235,7 @@ function mergePreservingSecrets(
 // ============================================================
 
 interface SectionProps {
-  scope: SettingsScope
+  scope: MessageChannelsForm
   listSessions: () => Promise<SessionOption[]>
   describeSecrets: () => Promise<Record<string, boolean>>
 }

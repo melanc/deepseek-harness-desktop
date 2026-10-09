@@ -180,11 +180,7 @@ describe('renderReportNotification', () => {
 
 describe('buildNotificationMessage', () => {
   it('builds a plugin-sourced user message', () => {
-    const message = buildNotificationMessage('hi') as {
-      role: string
-      content: Array<{ type: string; text: string }>
-      source: { kind: string; plugin: string }
-    }
+    const message = buildNotificationMessage('hi')
     expect(message.role).toBe('user')
     expect(message.content[0]).toMatchObject({ type: 'text', text: 'hi' })
     expect(message.source).toMatchObject({ kind: 'plugin', plugin: 'main-session' })

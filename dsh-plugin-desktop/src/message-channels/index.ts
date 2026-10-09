@@ -2,8 +2,8 @@
  * message-channels -- Host plugin
  *
  * Owns the message-channels feature:
- * - registers the `messageChannels` settings namespace (per-channel bot
- *   config + target session routing);
+ * - declares the entry's `Config` (per-channel bot config + target session
+ *   routing), which DSH projects into the entry's settings namespace;
  * - starts/stops the channel adapters (WeCom bot WebSocket, Feishu bot HTTP);
  * - routes inbound messages to the configured DSH agent session via the
  *   dispatcher;
@@ -17,7 +17,6 @@
 import { type Context, Service } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import {
-  MESSAGE_CHANNELS_NS,
   MessageChannelsConfig,
   type MessageChannelAdapter,
   type InboundMessage,
@@ -109,15 +108,39 @@ export class MessageChannelsService extends Service implements MessageChannelsSe
 // Plugin entry
 // ============================================================
 
-export function apply(ctx: Context): void {
-  // ── Settings namespace ──────────────────────────────────────────────────
-  const scope = ctx.settings.register(MESSAGE_CHANNELS_NS, MessageChannelsConfig)
+/**
+ * Fallback values used when the plugin is mounted without Loader config
+ * (tests, direct `ctx.plugin`). A Loader entry resolves the schema defaults
+ * from {@link Config} instead.
+ */
+const DEFAULT_CONFIG: MessageChannelsConfig = {
+  wecomBot: { enabled: false, botId: '', secret: '', wsUrl: '' },
+  feishuBot: { enabled: false, appId: '', appSecret: '' },
+  targetSessionId: '',
+}
 
-  const resolveConfig = (): MessageChannelsConfig => scope.get() ?? {
-    wecomBot: { enabled: false, botId: '', secret: '', wsUrl: '' },
-    feishuBot: { enabled: false, appId: '', appSecret: '' },
-    targetSessionId: '',
-  }
+/**
+ * Loader-entry config schema.
+ *
+ * Since DSH 0.2.0 a plugin declares its settings through its own `Config`
+ * export; the Loader derives the entry's settings namespace (the entry id,
+ * see `MESSAGE_CHANNELS_NS`) and its form schema from it.
+ */
+export const Config = MessageChannelsConfig
+
+export function apply(ctx: Context, config: MessageChannelsConfig = DEFAULT_CONFIG): void {
+  // ── Settings page policy ────────────────────────────────────────────────
+  // The desktop client registers its own `settings.section` for this entry,
+  // so the schema-derived page must not be generated next to it.
+  ctx.effect(
+    () => ctx.settings.configure({ auto: false }),
+    'message-channels: settings page policy',
+  )
+
+  // The Loader applies volatile writes to this same object in place, so it
+  // always holds the current values; `loader/volatile-update` is only the
+  // signal that some of them changed.
+  const resolveConfig = (): MessageChannelsConfig => config
 
   // ── Dispatcher ──────────────────────────────────────────────────────────
   const dispatcher = createDispatcher(
@@ -152,7 +175,9 @@ export function apply(ctx: Context): void {
   }, 'message-channels: channel lifecycle')
 
   // ── Settings change → reconnect ─────────────────────────────────────────
-  scope.watch(() => {
+  // The Loader emits this after applying volatile writes in place, so the
+  // adapters must re-read their config and reconnect.
+  ctx.on('loader/volatile-update', () => {
     for (const channel of channels.values()) {
       channel.reconnectWithConfig()
     }
