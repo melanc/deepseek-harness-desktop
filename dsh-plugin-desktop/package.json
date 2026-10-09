@@ -414,7 +414,7 @@
       "hardenedRuntime": true,
       "entitlements": "../deepseek-harness/apps/desktop/scripts/macos-entitlements.plist",
       "entitlementsInherit": "../deepseek-harness/apps/desktop/scripts/macos-entitlements.plist",
-      "icon": "build/app-icon.icon",
+      "icon": "build/app-icon.icns",
       "mergeASARs": false,
       "notarize": true,
       "signIgnore": [
