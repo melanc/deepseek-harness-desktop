@@ -8,7 +8,6 @@
  */
 
 import z from '@deepseek-ai/schemastery'
-import { settingsNamespace, type SettingsNamespace } from '@deepseek-ai/dsh-settings'
 
 // ============================================================
 // Channel identity
@@ -23,7 +22,7 @@ export const NOTIFY_CHANNEL_IDS = ['email', 'wecom', 'dingtalk', 'feishu', 'webh
 export type NotifyChannelId = (typeof NOTIFY_CHANNEL_IDS)[number]
 
 // ============================================================
-// Config schema (stored under the `messageChannels` settings ns)
+// Config schema (the plugin's Loader-entry Config)
 // ============================================================
 
 /** WeCom intelligent bot (企业微信智能机器人) config. */
@@ -52,12 +51,19 @@ export type FeishuBotConfig = {
   appSecret: string
 }
 
-/** Namespace document shape: per-channel bot config + routing. */
+/**
+ * Config document shape: per-channel bot config + routing.
+ *
+ * Every field is marked `volatile`, because DSH settings forms only accept
+ * writes to volatile fields. The Loader applies a volatile write in place and
+ * emits `loader/volatile-update` on the owning entry, so the running plugin
+ * sees the new values without being reloaded.
+ */
 export const MessageChannelsConfig = z.object({
-  wecomBot: WecomBotConfig.default({ enabled: false, botId: '', secret: '', wsUrl: '' }),
-  feishuBot: FeishuBotConfig.default({ enabled: false, appId: '', appSecret: '' }),
+  wecomBot: WecomBotConfig.default({ enabled: false, botId: '', secret: '', wsUrl: '' }).volatile(),
+  feishuBot: FeishuBotConfig.default({ enabled: false, appId: '', appSecret: '' }).volatile(),
   /** Session id that inbound bot messages are routed to. */
-  targetSessionId: z.string().default(''),
+  targetSessionId: z.string().default('').volatile(),
 })
 export type MessageChannelsConfig = {
   wecomBot: WecomBotConfig
@@ -134,8 +140,14 @@ export interface MessageChannelAdapter {
 // Shared constants
 // ============================================================
 
-/** Settings namespace id for the message-channels feature. */
-export const MESSAGE_CHANNELS_NS: SettingsNamespace = settingsNamespace('message-channels')
+/**
+ * Settings namespace id for the message-channels feature.
+ *
+ * Since DSH 0.2.0 a settings namespace IS the id of the owning profile
+ * plugin entry, so this must equal the entry id declared in
+ * `cordis.patch.yml` (and used by the client's settings section).
+ */
+export const MESSAGE_CHANNELS_NS = 'message-channels'
 
 /** Logger tag prefix. */
 export const LOG_TAG = '[MessageChannels]'

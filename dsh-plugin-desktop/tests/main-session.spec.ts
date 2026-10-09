@@ -17,6 +17,9 @@ function fakeAgent(
     session: {
       seq: events.length,
       events,
+      // The service reads the durable log through `snapshotEvents()`, which is
+      // the session API upstream settled on; `events` is the same list.
+      snapshotEvents: () => events,
       deriveMessages: () => messages,
     },
   } as unknown as Agent
